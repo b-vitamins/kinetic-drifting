@@ -337,7 +337,8 @@ class LightningDiT(nn.Module):
         self.out_channels = out_channels
         self.n_cls_tokens = n_cls_tokens
         self.cond_dim = hidden_size if cond_dim is None else cond_dim
-        self.patch_embed: TorchLinear | None = None
+        patch_dim = patch_size * patch_size * in_channels
+        self.patch_embed = TorchLinear(patch_dim, self.hidden_size)
         self.cls_proj = TorchLinear(self.cond_dim, hidden_size) if n_cls_tokens > 0 else None
         self.blocks = nn.ModuleList(
             [
@@ -369,13 +370,10 @@ class LightningDiT(nn.Module):
 
     def _ensure_embeddings(
         self,
-        input_patch_dim: int,
         num_patches: int,
         device: torch.device,
         dtype: torch.dtype,
     ) -> None:
-        if self.patch_embed is None:
-            self.patch_embed = TorchLinear(input_patch_dim, self.hidden_size)
         if self.pos_embed.numel() != num_patches * self.hidden_size:
             grid_size = int(math.sqrt(num_patches))
             pos_embed = get_2d_sincos_pos_embed(self.hidden_size, grid_size)
@@ -404,8 +402,7 @@ class LightningDiT(nn.Module):
             num_patches,
             effective_patch * effective_patch * channels,
         )
-        self._ensure_embeddings(x.shape[-1], num_patches, x.device, x.dtype)
-        assert self.patch_embed is not None
+        self._ensure_embeddings(num_patches, x.device, x.dtype)
         x = self.patch_embed(x)
         x = x + self.pos_embed
 
