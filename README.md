@@ -34,3 +34,13 @@ pytest
 ```
 
 Warnings are treated as test failures.
+
+## CLI
+
+The package exposes a single `kdrifting` command:
+
+```bash
+kdrifting train-mae --config path/to/mae.yaml --workdir runs/mae
+kdrifting train-gen --config path/to/gen.yaml --workdir runs/gen
+kdrifting infer --init-from runs/gen/params_ema --workdir runs/infer
+```

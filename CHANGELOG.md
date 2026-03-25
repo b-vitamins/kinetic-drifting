@@ -14,3 +14,7 @@ Commits for commit subjects.
   builder used by drift training.
 - Added local/`hf://` torch artifact loaders for MAE and generator models,
   plus metadata-driven feature model construction helpers.
+- Added high-level MAE and generator runners, shared runner utilities, and
+  checkpoint/artifact save wiring for the top-level training loops.
+- Added generator inference helpers and top-level CLI subcommands for training
+  and sampling.
