@@ -12,3 +12,5 @@ Commits for commit subjects.
   and the config-driven model builder.
 - Added the ConvNeXt V2 feature backbone and combined MAE/ConvNeXt activation
   builder used by drift training.
+- Added local/`hf://` torch artifact loaders for MAE and generator models,
+  plus metadata-driven feature model construction helpers.

@@ -18,6 +18,6 @@ repos:
         pass_filenames: false
       - id: pytest
         name: pytest
-        entry: env PYTHONDONTWRITEBYTECODE=1 pytest -p no:cacheprovider
+        entry: env PYTHONDONTWRITEBYTECODE=1 pytest -o cache_dir=/tmp/kdrifting-pytest-cache
         language: system
         pass_filenames: false

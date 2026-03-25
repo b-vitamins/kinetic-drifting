@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
 import torch
@@ -407,6 +407,12 @@ class MAEResNet(nn.Module):
             "mask_ratio_max": 0.75,
             "train": False,
         }
+
+
+def mae_from_metadata(metadata: Mapping[str, Any]) -> MAEResNet:
+    model_config = dict(metadata.get("model_config", {}) or {})
+    num_classes = int(model_config.pop("num_classes", 1000))
+    return MAEResNet(num_classes=num_classes, **model_config)
 
 
 def build_activation_function(
