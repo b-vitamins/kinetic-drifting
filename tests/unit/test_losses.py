@@ -1,11 +1,36 @@
 from __future__ import annotations
 
+import importlib
 import math
+import sys
+import warnings
+from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import torch
 
 from kdrifting.losses import drift_loss
+
+UPSTREAM_ROOT = Path("/home/b/projects/drifting")
+JAX = cast(Any, importlib.import_module("jax"))
+
+
+def _import_upstream(module_name: str) -> Any:
+    root = str(UPSTREAM_ROOT)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    return importlib.import_module(module_name)
+
+
+def _run_upstream_drift_loss(upstream_loss: Any, /, *args: Any, **kwargs: Any) -> Any:
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Passing arguments 'a', 'a_min' or 'a_max' to jax.numpy.clip is deprecated.*",
+            category=DeprecationWarning,
+        )
+        return upstream_loss.drift_loss(*args, **kwargs)
 
 
 def _numpy_cdist(x: np.ndarray, y: np.ndarray, eps: float = 1e-8) -> np.ndarray:
@@ -144,6 +169,84 @@ def test_drift_loss_gradient_matches_finite_difference() -> None:
     np.testing.assert_allclose(
         autodiff_grad.detach().numpy(),
         manual_grad,
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+
+def test_drift_loss_matches_upstream_jax_reference() -> None:
+    upstream_loss = _import_upstream("drift_loss")
+    gen = torch.linspace(-0.6, 0.4, steps=2 * 3 * 4, dtype=torch.float32).reshape(2, 3, 4)
+    fixed_pos = torch.linspace(0.2, 1.1, steps=2 * 2 * 4, dtype=torch.float32).reshape(2, 2, 4)
+    fixed_neg = torch.linspace(-1.0, -0.1, steps=2 * 1 * 4, dtype=torch.float32).reshape(2, 1, 4)
+    weight_gen = torch.tensor([[1.0, 0.8, 1.2], [0.7, 1.1, 0.9]], dtype=torch.float32)
+    weight_pos = torch.tensor([[1.0, 1.5], [0.6, 1.4]], dtype=torch.float32)
+    weight_neg = torch.tensor([[0.5], [1.3]], dtype=torch.float32)
+
+    loss_torch, info_torch = drift_loss(
+        gen,
+        fixed_pos,
+        fixed_neg,
+        weight_gen=weight_gen,
+        weight_pos=weight_pos,
+        weight_neg=weight_neg,
+        r_list=(0.05, 0.2),
+    )
+    loss_jax, info_jax = _run_upstream_drift_loss(
+        upstream_loss,
+        np.asarray(gen),
+        np.asarray(fixed_pos),
+        np.asarray(fixed_neg),
+        np.asarray(weight_gen),
+        np.asarray(weight_pos),
+        np.asarray(weight_neg),
+        R_list=(0.05, 0.2),
+    )
+
+    np.testing.assert_allclose(
+        loss_torch.detach().numpy(),
+        np.asarray(loss_jax),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    assert set(info_torch) == set(info_jax)
+    for key, value in info_torch.items():
+        np.testing.assert_allclose(
+            value.detach().numpy(),
+            np.asarray(info_jax[key]),
+            rtol=1e-5,
+            atol=1e-5,
+        )
+
+
+def test_drift_loss_gradient_matches_upstream_jax_gradient() -> None:
+    upstream_loss = _import_upstream("drift_loss")
+    gen = torch.linspace(-0.4, 0.7, steps=2 * 2 * 3, dtype=torch.float32).reshape(
+        2,
+        2,
+        3,
+    )
+    gen.requires_grad_(True)
+    fixed_pos = torch.linspace(0.1, 1.0, steps=2 * 2 * 3, dtype=torch.float32).reshape(2, 2, 3)
+    fixed_neg = torch.linspace(-0.9, -0.2, steps=2 * 1 * 3, dtype=torch.float32).reshape(2, 1, 3)
+
+    loss_torch, _ = drift_loss(gen, fixed_pos, fixed_neg, r_list=(0.05, 0.2))
+    grad_torch = torch.autograd.grad(loss_torch.sum(), gen)[0]
+
+    def loss_fn(gen_in: Any) -> Any:
+        loss_jax, _ = _run_upstream_drift_loss(
+            upstream_loss,
+            gen_in,
+            np.asarray(fixed_pos),
+            np.asarray(fixed_neg),
+            R_list=(0.05, 0.2),
+        )
+        return loss_jax.sum()
+
+    grad_jax = JAX.grad(loss_fn)(np.asarray(gen.detach()))
+    np.testing.assert_allclose(
+        grad_torch.detach().numpy(),
+        np.asarray(grad_jax),
         rtol=1e-5,
         atol=1e-5,
     )

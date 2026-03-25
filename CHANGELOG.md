@@ -32,3 +32,5 @@ Commits for commit subjects.
   numerical parity coverage for loading from run roots and `checkpoints/`.
 - Added torch checkpoint-directory and direct checkpoint-file restore support
   for local MAE and generator loading, using EMA weights plus sibling metadata.
+- Added direct upstream JAX parity coverage for the drift loss, including
+  value and gradient checks on fixed feature tensors.
