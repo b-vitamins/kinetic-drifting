@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from kdrifting.models.generator import DitGen, get_2d_sincos_pos_embed
+from kdrifting.models.generator import DitGen
 from kdrifting.models.mae import MAEResNet
 
 _LEGACY_METADATA_NAME = "ema_model.metadata.json"
@@ -242,7 +242,7 @@ def _generator_target_key(source_key: str) -> str | None:
         param_name = "weight" if match.group(2) == "kernel" else "bias"
         return f"{target_prefix}.linear.{param_name}"
     if source_key == "LightningDiT_0.pos_embed":
-        return None
+        return "model.pos_embed"
     if source_key == "LightningDiT_0.cls_embed":
         return "model.cls_embed"
     if match := re.fullmatch(
@@ -315,26 +315,9 @@ def _generator_target_key(source_key: str) -> str | None:
     raise KeyError(f"Unsupported generator parameter: {source_key}")
 
 
-def _validate_generator_pos_embed(flat_params: dict[str, Any], model: DitGen) -> None:
-    source_key = "LightningDiT_0.pos_embed"
-    if source_key not in flat_params:
-        return
-
-    source_value = _to_numpy(flat_params[source_key]).astype(np.float32, copy=False)
-    num_patches = source_value.shape[1]
-    grid_size = int(round(num_patches**0.5))
-    target_value = get_2d_sincos_pos_embed(model.model.hidden_size, grid_size)
-    target_value = target_value.astype(np.float32, copy=False)[None, :, :]
-    if not np.allclose(source_value, target_value, atol=1e-6, rtol=1e-6):
-        raise ValueError(
-            "Source JAX positional embedding does not match the PyTorch runtime buffer.",
-        )
-
-
 def convert_generator_jax_params(params: Any, model: DitGen) -> dict[str, Tensor]:
     """Convert upstream JAX generator params to a PyTorch state dict."""
     flat_params = _flatten_tree(params)
-    _validate_generator_pos_embed(flat_params, model)
     return _convert_tree(
         flat_params,
         model.state_dict(),

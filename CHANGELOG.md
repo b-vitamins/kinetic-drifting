@@ -40,3 +40,6 @@ Commits for commit subjects.
   generator models, covering schedule-driven parameter and EMA updates.
 - Added external torch and JAX checkpoint restore for training state bootstraps,
   including conversion of upstream Optax AdamW moments into torch AdamW state.
+- Made the generator positional embedding trainable to match upstream JAX
+  semantics and extended parity coverage to resumed real-model MAE and
+  generator training traces driven from imported JAX checkpoints.

@@ -366,21 +366,11 @@ class LightningDiT(nn.Module):
         )
         if self.cls_embed is not None:
             nn.init.normal_(self.cls_embed, std=0.02)
-        self.register_buffer("pos_embed", torch.empty(0), persistent=False)
-
-    def _ensure_embeddings(
-        self,
-        num_patches: int,
-        device: torch.device,
-        dtype: torch.dtype,
-    ) -> None:
-        if self.pos_embed.numel() != num_patches * self.hidden_size:
-            grid_size = int(math.sqrt(num_patches))
-            pos_embed = get_2d_sincos_pos_embed(self.hidden_size, grid_size)
-            tensor = torch.as_tensor(pos_embed, device=device, dtype=dtype).unsqueeze(0)
-            self.pos_embed = tensor
-        else:
-            self.pos_embed = self.pos_embed.to(device=device, dtype=dtype)
+        num_patches = (input_size // patch_size) ** 2
+        grid_size = int(math.sqrt(num_patches))
+        pos_embed = get_2d_sincos_pos_embed(self.hidden_size, grid_size)
+        pos_tensor = torch.as_tensor(pos_embed, dtype=torch.float32).unsqueeze(0)
+        self.pos_embed = nn.Parameter(pos_tensor)
 
     def forward(self, x: Tensor, c: Tensor, *, deterministic: bool = True) -> Tensor:
         batch, height, _, channels = x.shape
@@ -402,9 +392,8 @@ class LightningDiT(nn.Module):
             num_patches,
             effective_patch * effective_patch * channels,
         )
-        self._ensure_embeddings(num_patches, x.device, x.dtype)
         x = self.patch_embed(x)
-        x = x + self.pos_embed
+        x = x + self.pos_embed.to(device=x.device, dtype=x.dtype)
 
         if self.n_cls_tokens > 0:
             assert self.cls_proj is not None

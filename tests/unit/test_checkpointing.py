@@ -215,15 +215,15 @@ def test_restore_external_jax_mae_checkpoint_restores_params_ema_and_adamw_state
 ) -> None:
     upstream_mae = _import_upstream("models.mae_model")
     metadata = {
-            "kind": "mae",
-            "backend": "jax",
-            "model_config": {
-                "num_classes": 5,
-                "in_channels": 3,
-                "base_channels": 64,
-                "patch_size": 2,
-                "layers": [1, 1, 1, 1],
-                "input_patch_size": 1,
+        "kind": "mae",
+        "backend": "jax",
+        "model_config": {
+            "num_classes": 5,
+            "in_channels": 3,
+            "base_channels": 64,
+            "patch_size": 2,
+            "layers": [1, 1, 1, 1],
+            "input_patch_size": 1,
         },
     }
     upstream_model = upstream_mae._mae_from_metadata(metadata)
