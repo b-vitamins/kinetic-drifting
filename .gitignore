@@ -1,0 +1,20 @@
+.coverage
+.mypy_cache/
+.nox/
+.pre-commit-config.yaml.lock
+.pytest_cache/
+.pyright/
+.ruff_cache/
+.venv/
+__pycache__/
+build/
+dist/
+htmlcov/
+*.egg-info/
+*.pyc
+*.pyo
+*.pyd
+
+# Local experiment outputs
+log/
+runs/
