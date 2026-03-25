@@ -5,8 +5,9 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from pytest import MonkeyPatch
 
-from kdrifting.inference import parse_labels, run_inference
+from kdrifting.inference import parse_labels, run_fid_evaluation, run_inference
 from kdrifting.models.generator import DitGen
 
 
@@ -73,3 +74,76 @@ def test_run_inference_saves_outputs(tmp_path: Path) -> None:
 
     samples = torch.load(output_dir / "samples.pt", map_location="cpu", weights_only=False)
     assert tuple(samples.shape) == (4, 3, 8, 8)
+
+
+def test_run_fid_evaluation_wires_eval_stack(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    artifact_dir = _generator_artifact(tmp_path)
+    output_dir = tmp_path / "fid"
+    json_copy = tmp_path / "fid_report.json"
+    captured: dict[str, Any] = {}
+
+    class FakeLogger:
+        def set_logging(self, **kwargs: Any) -> None:
+            captured["logger_kwargs"] = kwargs
+
+        def log_dict(self, values: dict[str, Any]) -> None:
+            captured["logged_dict"] = values
+
+        def log_image(self, name: str, images: Any) -> None:
+            captured["logged_image"] = (name, images)
+
+        def finish(self) -> None:
+            captured["finished"] = True
+
+    def fake_create_imagenet_split(
+        **kwargs: Any,
+    ) -> tuple[list[tuple[torch.Tensor, torch.Tensor]], Any, Any]:
+        captured["split_kwargs"] = kwargs
+        loader = [(torch.zeros(2, 3, 8, 8), torch.tensor([1, 2], dtype=torch.int64))]
+
+        def preprocess(batch: tuple[torch.Tensor, torch.Tensor]) -> dict[str, torch.Tensor]:
+            images, labels = batch
+            return {"images": images, "labels": labels}
+
+        def postprocess(images: torch.Tensor) -> torch.Tensor:
+            return images
+
+        return loader, preprocess, postprocess
+
+    def fake_evaluate_fid(**kwargs: Any) -> dict[str, float]:
+        captured["eval_kwargs"] = kwargs
+        batch = kwargs["eval_loader"][0]
+        generated = kwargs["gen_func"](batch, 0)
+        assert tuple(generated.shape) == (2, 3, 8, 8)
+        return {"fid": 1.25, "isc_mean": 2.0, "isc_std": 0.1}
+
+    import kdrifting.inference as inference_module
+
+    monkeypatch.setattr(inference_module, "WandbLogger", FakeLogger)
+    monkeypatch.setattr(inference_module, "create_imagenet_split", fake_create_imagenet_split)
+    monkeypatch.setattr(inference_module, "evaluate_fid", fake_evaluate_fid)
+
+    result = run_fid_evaluation(
+        init_from=str(artifact_dir),
+        workdir=str(output_dir),
+        cfg_scale=1.5,
+        num_samples=128,
+        eval_batch_size=32,
+        device="cpu",
+        seed=7,
+        json_out=str(json_copy),
+        use_wandb=False,
+    )
+
+    assert result["fid"] == 1.25
+    assert result["isc_mean"] == 2.0
+    assert result["eval_batch_size"] == 32
+    assert captured["split_kwargs"]["resolution"] == 256
+    assert captured["eval_kwargs"]["log_prefix"] == "cfg_1.5"
+    assert captured["logger_kwargs"]["use_wandb"] is False
+    assert captured["finished"] is True
+    assert (output_dir / "result.json").is_file()
+    assert json_copy.is_file()

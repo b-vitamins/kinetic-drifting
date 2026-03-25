@@ -24,3 +24,5 @@ Commits for commit subjects.
   instead of the earlier preview-only placeholder.
 - Added JAX artifact import and conversion for MAE and generator bundles,
   including numerical parity tests against the upstream JAX modules.
+- Added a source-compatible `eval-fid` CLI path on top of the torch metric
+  stack, alongside the existing preview-style sampling command.

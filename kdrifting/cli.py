@@ -63,6 +63,39 @@ def build_parser() -> argparse.ArgumentParser:
     infer_parser.add_argument("--device", default="auto", help="Torch device or 'auto'.")
     infer_parser.add_argument("--seed", type=int, default=0, help="Base random seed.")
     infer_parser.add_argument("--json-out", default="", help="Optional extra JSON output path.")
+
+    fid_parser = subparsers.add_parser("eval-fid", help="Run release-style generator FID eval.")
+    fid_parser.add_argument(
+        "--init-from",
+        required=True,
+        help="Local or hf:// generator artifact.",
+    )
+    fid_parser.add_argument("--workdir", default="runs/infer", help="Output directory.")
+    fid_parser.add_argument(
+        "--cfg-scale",
+        type=float,
+        default=1.0,
+        help="Classifier-free guidance scale.",
+    )
+    fid_parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=50000,
+        help="Number of evaluation samples to generate.",
+    )
+    fid_parser.add_argument(
+        "--eval-batch-size",
+        type=int,
+        default=2048,
+        help="Evaluation batch size.",
+    )
+    fid_parser.add_argument("--device", default="auto", help="Torch device or 'auto'.")
+    fid_parser.add_argument("--seed", type=int, default=0, help="Base random seed.")
+    fid_parser.add_argument("--json-out", default="", help="Optional extra JSON output path.")
+    fid_parser.add_argument("--use-wandb", action="store_true", help="Enable wandb logging.")
+    fid_parser.add_argument("--wandb-entity", default=None, help="Optional wandb entity.")
+    fid_parser.add_argument("--wandb-project", default="release-fid", help="wandb project name.")
+    fid_parser.add_argument("--wandb-name", default=None, help="Optional wandb run name.")
     return parser
 
 
@@ -109,6 +142,26 @@ def main() -> None:
             device=args.device,
             seed=args.seed,
             json_out=args.json_out,
+        )
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "eval-fid":
+        from kdrifting.inference import run_fid_evaluation
+
+        result = run_fid_evaluation(
+            init_from=args.init_from,
+            workdir=args.workdir,
+            cfg_scale=args.cfg_scale,
+            num_samples=args.num_samples,
+            eval_batch_size=args.eval_batch_size,
+            device=args.device,
+            seed=args.seed,
+            json_out=args.json_out,
+            use_wandb=args.use_wandb,
+            wandb_entity=args.wandb_entity,
+            wandb_project=args.wandb_project,
+            wandb_name=args.wandb_name,
         )
         print(json.dumps(result, indent=2))
         return
