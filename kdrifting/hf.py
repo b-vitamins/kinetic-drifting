@@ -47,11 +47,19 @@ def _looks_like_torch_artifact(artifact_dir: Path) -> bool:
     return (artifact_dir / "ema_model.pt").is_file()
 
 
-def _looks_like_jax_artifact(artifact_dir: Path) -> bool:
+def _looks_like_direct_jax_artifact(artifact_dir: Path) -> bool:
     return any(
         (
             (artifact_dir / "ema_params.msgpack").is_file(),
             (artifact_dir / "ema_model.msgpack").is_file(),
+        ),
+    )
+
+
+def _looks_like_jax_artifact(artifact_dir: Path) -> bool:
+    return any(
+        (
+            _looks_like_direct_jax_artifact(artifact_dir),
             artifact_dir.name == "checkpoints",
             (artifact_dir / "checkpoints").is_dir(),
         ),
@@ -88,14 +96,18 @@ def _resolve_local_artifact_dir(path: str | Path) -> Path:
     artifact_path = Path(path).expanduser().resolve()
     if artifact_path.is_file():
         artifact_path = artifact_path.parent
-    if (artifact_path / "metadata.json").is_file() or _looks_like_torch_artifact(artifact_path):
+    if _looks_like_torch_artifact(artifact_path) or _looks_like_direct_jax_artifact(artifact_path):
         return artifact_path
     params_ema_dir = artifact_path / "params_ema"
-    if (params_ema_dir / "metadata.json").is_file() or _looks_like_jax_artifact(params_ema_dir):
+    if _looks_like_torch_artifact(params_ema_dir) or _looks_like_direct_jax_artifact(
+        params_ema_dir
+    ):
         return params_ema_dir
     checkpoints_dir = artifact_path / "checkpoints"
     if checkpoints_dir.is_dir():
         return checkpoints_dir
+    if (params_ema_dir / "metadata.json").is_file():
+        return params_ema_dir
     if artifact_path.name == "checkpoints" and artifact_path.is_dir():
         return artifact_path
     raise FileNotFoundError(f"Could not find a model artifact under {artifact_path}")

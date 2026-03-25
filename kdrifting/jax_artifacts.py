@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import re
+import warnings
 from pathlib import Path
 from typing import Any, cast
 
@@ -80,7 +81,13 @@ def load_jax_init_entry(artifact_dir: Path) -> tuple[Any, dict[str, Any]]:
         return serialization.msgpack_restore(legacy_params_path.read_bytes()), legacy_metadata
 
     checkpoints = _import_flax_checkpoints()
-    restored = checkpoints.restore_checkpoint(str(artifact_dir), target=None, step=None)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Sharding info not provided when restoring\\..*",
+            category=UserWarning,
+        )
+        restored = checkpoints.restore_checkpoint(str(artifact_dir), target=None, step=None)
     if isinstance(restored, dict) and "params" in restored:
         return cast(Any, restored["params"]), metadata
 

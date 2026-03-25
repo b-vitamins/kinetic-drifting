@@ -28,3 +28,5 @@ Commits for commit subjects.
   stack, alongside the existing preview-style sampling command.
 - Hardened resumable generator training by checkpointing memory-bank state,
   restoring it on resume, and making checkpoint/artifact writes rank-safe.
+- Extended JAX import parity to resumable checkpoint directories, including
+  numerical parity coverage for loading from run roots and `checkpoints/`.
