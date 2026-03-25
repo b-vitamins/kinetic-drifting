@@ -56,3 +56,7 @@ Commits for commit subjects.
 - Added deterministic noise overrides to the generator sampling path and used
   them to verify end-to-end public inference parity against upstream JAX for
   both `run_inference` and the generator callback inside `run_fid_evaluation`.
+- Added direct metric-math parity coverage against the upstream JAX helpers for
+  FID, Inception Score, and precision/recall.
+- Added a repeatable `certify` harness that runs the curated single-machine
+  parity suite and writes markdown and JSON certification reports.

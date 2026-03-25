@@ -46,4 +46,5 @@ kdrifting infer --init-from runs/gen/params_ema --workdir runs/infer
 kdrifting eval-fid --init-from runs/gen/params_ema --workdir runs/eval
 kdrifting export-model --kind gen --init-from hf://release-gen --workdir exports/gen
 kdrifting export-checkpoint --kind gen --init-from /path/to/jax_run --config gen.yaml --workdir exports/gen-run
+kdrifting certify --output-dir reports/single-machine
 ```

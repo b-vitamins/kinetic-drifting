@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import importlib
+import sys
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -12,6 +14,15 @@ from torch.utils.data import DataLoader, TensorDataset
 from kdrifting.eval.fid import compute_frechet_distance
 from kdrifting.eval.generation import compute_inception_score, compute_inception_stats, evaluate_fid
 from kdrifting.eval.precision_recall import compute_precision_recall
+
+UPSTREAM_ROOT = Path("/home/b/projects/drifting")
+
+
+def _import_upstream(module_name: str) -> Any:
+    root = str(UPSTREAM_ROOT)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    return importlib.import_module(module_name)
 
 
 class _FakeExtractor(nn.Module):
@@ -107,6 +118,94 @@ def test_compute_inception_score_returns_finite_values() -> None:
     assert np.isfinite(mean)
     assert np.isfinite(std)
     assert mean > 1.0
+
+
+def test_compute_frechet_distance_matches_upstream_jax_helper() -> None:
+    upstream_fid = _import_upstream("utils.jax_fid.fid")
+    mu_1 = np.array([1.0, -2.0, 0.5], dtype=np.float64)
+    mu_2 = np.array([-0.5, 3.0, 1.5], dtype=np.float64)
+    sigma_1 = np.array(
+        [
+            [2.0, 0.25, 0.1],
+            [0.25, 1.5, -0.05],
+            [0.1, -0.05, 0.8],
+        ],
+        dtype=np.float64,
+    )
+    sigma_2 = np.array(
+        [
+            [1.8, -0.15, 0.2],
+            [-0.15, 2.2, 0.05],
+            [0.2, 0.05, 1.1],
+        ],
+        dtype=np.float64,
+    )
+
+    expected = float(upstream_fid.compute_frechet_distance(mu_1, mu_2, sigma_1, sigma_2))
+    actual = compute_frechet_distance(mu_1, mu_2, sigma_1, sigma_2)
+
+    assert abs(actual - expected) < 1e-12
+
+
+def test_compute_inception_score_matches_upstream_jax_helper() -> None:
+    upstream_fid_util = _import_upstream("utils.fid_util")
+    logits = np.array(
+        [
+            [4.0, 1.0, 0.5],
+            [3.0, 1.5, 0.5],
+            [0.5, 4.0, 1.0],
+            [1.0, 3.0, 0.5],
+            [0.5, 1.0, 4.0],
+            [0.5, 1.5, 3.5],
+            [4.5, 0.5, 1.0],
+            [3.5, 0.5, 1.5],
+            [1.0, 4.0, 0.5],
+            [0.5, 3.5, 1.0],
+        ],
+        dtype=np.float64,
+    )
+
+    expected_mean, expected_std = upstream_fid_util._compute_inception_score(logits, splits=5)
+    actual_mean, actual_std = compute_inception_score(logits, splits=5)
+
+    assert abs(actual_mean - expected_mean) < 1e-7
+    assert abs(actual_std - expected_std) < 1e-7
+
+
+def test_compute_precision_recall_matches_upstream_jax_helper() -> None:
+    jax_module = _import_upstream("jax")
+    jax_module.config.update("jax_enable_x64", True)
+    upstream_pr = _import_upstream("utils.jax_fid.precision_recall")
+    features_real = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [0.5, 0.25],
+        ],
+        dtype=np.float64,
+    )
+    features_fake = np.array(
+        [
+            [0.1, 0.0],
+            [0.9, 0.1],
+            [0.2, 0.8],
+            [0.8, 0.9],
+            [0.45, 0.3],
+        ],
+        dtype=np.float64,
+    )
+
+    expected_precision, expected_recall = upstream_pr.compute_precision_recall(
+        features_real,
+        features_fake,
+        k=3,
+    )
+    actual_precision, actual_recall = compute_precision_recall(features_real, features_fake, k=3)
+
+    assert abs(actual_precision - float(expected_precision)) < 1e-12
+    assert abs(actual_recall - float(expected_recall)) < 1e-12
 
 
 def test_compute_inception_stats_collects_features_and_logits() -> None:

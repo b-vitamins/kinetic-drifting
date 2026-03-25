@@ -63,6 +63,15 @@ def test_cli_parser_accepts_export_subcommands() -> None:
     assert checkpoint_args.device == "cpu"
 
 
+def test_cli_parser_accepts_certify_subcommand() -> None:
+    args = build_parser().parse_args(["certify"])
+
+    assert args.command == "certify"
+    assert args.output_dir == "reports/single-machine"
+    assert args.python is None
+    assert args.pytest_cache_dir == "/tmp/kdrifting-pytest-cache"
+
+
 def test_cli_main_dispatches_inference(
     monkeypatch: MonkeyPatch,
     capsys: CaptureFixture[str],
@@ -218,3 +227,43 @@ def test_cli_main_dispatches_export_checkpoint(
     assert captured["init_from"] == "checkpoint"
     assert captured["device"] == "cpu"
     assert json.loads(capsys.readouterr().out)["step"] == 7
+
+
+def test_cli_main_dispatches_certify(
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_run_single_machine_certification(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"overall_passed": True, "markdown_report": "/tmp/report.md"}
+
+    import kdrifting.certify as certify_module
+
+    monkeypatch.setattr(
+        certify_module,
+        "run_single_machine_certification",
+        fake_run_single_machine_certification,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "kdrifting",
+            "certify",
+            "--output-dir",
+            "reports/custom",
+            "--python",
+            "/tmp/python",
+            "--pytest-cache-dir",
+            "/tmp/cache",
+        ],
+    )
+
+    main()
+
+    assert captured["output_dir"] == "reports/custom"
+    assert captured["python_executable"] == "/tmp/python"
+    assert captured["pytest_cache_dir"] == "/tmp/cache"
+    assert json.loads(capsys.readouterr().out)["overall_passed"] is True

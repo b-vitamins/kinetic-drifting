@@ -140,6 +140,26 @@ def build_parser() -> argparse.ArgumentParser:
         default="cpu",
         help="Torch device for temporary reconstruction, or 'auto'.",
     )
+
+    certify_parser = subparsers.add_parser(
+        "certify",
+        help="Run the curated single-machine parity certification suite.",
+    )
+    certify_parser.add_argument(
+        "--output-dir",
+        default="reports/single-machine",
+        help="Directory for markdown and JSON certification reports.",
+    )
+    certify_parser.add_argument(
+        "--python",
+        default=None,
+        help="Optional Python executable to use for pytest subprocesses.",
+    )
+    certify_parser.add_argument(
+        "--pytest-cache-dir",
+        default="/tmp/kdrifting-pytest-cache",
+        help="Pytest cache directory used by certification subprocesses.",
+    )
     return parser
 
 
@@ -232,6 +252,23 @@ def main() -> None:
             workdir=args.workdir,
             device=args.device,
         )
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "certify":
+        from kdrifting.certify import run_single_machine_certification
+
+        if args.python is None:
+            result = run_single_machine_certification(
+                output_dir=args.output_dir,
+                pytest_cache_dir=args.pytest_cache_dir,
+            )
+        else:
+            result = run_single_machine_certification(
+                output_dir=args.output_dir,
+                python_executable=args.python,
+                pytest_cache_dir=args.pytest_cache_dir,
+            )
         print(json.dumps(result, indent=2))
         return
 
