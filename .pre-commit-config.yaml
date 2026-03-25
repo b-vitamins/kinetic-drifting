@@ -18,6 +18,6 @@ repos:
         pass_filenames: false
       - id: pytest
         name: pytest
-        entry: pytest
+        entry: env PYTHONDONTWRITEBYTECODE=1 pytest -p no:cacheprovider
         language: system
         pass_filenames: false

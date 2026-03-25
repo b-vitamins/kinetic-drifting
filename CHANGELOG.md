@@ -10,3 +10,5 @@ Commits for commit subjects.
 - Initialized repository conventions, strict tooling, and development gates.
 - Ported the ImageNet pixel and latent data pipeline, VAE encode/decode helpers,
   and the config-driven model builder.
+- Added the ConvNeXt V2 feature backbone and combined MAE/ConvNeXt activation
+  builder used by drift training.

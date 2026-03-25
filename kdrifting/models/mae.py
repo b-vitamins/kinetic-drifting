@@ -12,6 +12,7 @@ from einops import rearrange
 from torch import Tensor, nn
 
 from kdrifting.models.common import bchw_to_bhwc, bhwc_to_bchw, safe_std
+from kdrifting.models.convnext import ConvNextV2
 
 
 def _choose_gn_groups(num_channels: int, max_groups: int = 32) -> int:
@@ -410,6 +411,9 @@ class MAEResNet(nn.Module):
 
 def build_activation_function(
     mae_model: MAEResNet | None,
+    *,
+    convnext_model: ConvNextV2 | None = None,
+    postprocess_fn: Callable[[Tensor], Tensor] | None = None,
 ) -> Callable[..., dict[str, Tensor]]:
     """Build the feature extraction callable used by drift training."""
 
@@ -417,6 +421,7 @@ def build_activation_function(
         params: dict[str, Tensor] | None,
         x: Tensor,
         *,
+        convnext_kwargs: dict[str, Any] | None = None,
         has_scale: bool = False,
         **kwargs: Any,
     ) -> dict[str, Tensor]:
@@ -426,6 +431,28 @@ def build_activation_function(
             usual_feats["norm_x"] = torch.sqrt((x**2).mean(dim=(1, 2)) + 1e-6).unsqueeze(1)
         if mae_model is not None:
             usual_feats |= mae_model.get_activations(x, **kwargs)
+        if convnext_model is not None:
+            if postprocess_fn is None:
+                raise ValueError("postprocess_fn is required when convnext_model is provided.")
+            convnext_input = postprocess_fn(x)
+            if convnext_input.ndim != 4:
+                raise ValueError(
+                    f"Expected 4D ConvNeXt input, got shape {tuple(convnext_input.shape)}",
+                )
+            if convnext_input.shape[1] in {1, 3} and convnext_input.shape[-1] not in {1, 3}:
+                convnext_input = bchw_to_bhwc(convnext_input)
+            imagenet_mean = torch.tensor(
+                [0.485, 0.456, 0.406],
+                device=convnext_input.device,
+                dtype=convnext_input.dtype,
+            )
+            imagenet_std = torch.tensor(
+                [0.229, 0.224, 0.225],
+                device=convnext_input.device,
+                dtype=convnext_input.dtype,
+            )
+            convnext_input = (convnext_input - imagenet_mean) / imagenet_std
+            usual_feats |= convnext_model.get_activations(convnext_input, **(convnext_kwargs or {}))
         return usual_feats
 
     return activation_fn
