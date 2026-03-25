@@ -22,3 +22,5 @@ Commits for commit subjects.
   precision/recall using the FID-specific Inception V3 weights.
 - Wired generator evaluation to the source-compatible sanity/full metric flow
   instead of the earlier preview-only placeholder.
+- Added JAX artifact import and conversion for MAE and generator bundles,
+  including numerical parity tests against the upstream JAX modules.

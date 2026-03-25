@@ -71,14 +71,23 @@ class BasicBlock(nn.Module):
         self.conv2 = nn.Conv2d(filters, filters, kernel_size=3, stride=1, padding=1, bias=False)
         self.gn2 = nn.GroupNorm(_choose_gn_groups(filters, gn_max_groups), filters)
         self.drop = nn.Dropout(dropout_prob)
-        self.proj_conv = nn.Conv2d(
-            in_channels,
-            filters,
-            kernel_size=1,
-            stride=stride,
-            bias=False,
+        needs_projection = in_channels != filters or stride != 1
+        self.proj_conv = (
+            nn.Conv2d(
+                in_channels,
+                filters,
+                kernel_size=1,
+                stride=stride,
+                bias=False,
+            )
+            if needs_projection
+            else None
         )
-        self.proj_gn = nn.GroupNorm(_choose_gn_groups(filters, gn_max_groups), filters)
+        self.proj_gn = (
+            nn.GroupNorm(_choose_gn_groups(filters, gn_max_groups), filters)
+            if needs_projection
+            else None
+        )
 
     def forward(self, x: Tensor) -> Tensor:
         residual = x
@@ -87,6 +96,8 @@ class BasicBlock(nn.Module):
         y = self.gn2(self.conv2(y))
 
         if residual.shape != y.shape:
+            assert self.proj_conv is not None
+            assert self.proj_gn is not None
             residual = self.proj_gn(self.proj_conv(residual))
         return functional.relu(residual + y)
 
@@ -97,6 +108,7 @@ class ResNetEncoder(nn.Module):
     def __init__(
         self,
         *,
+        in_channels: int,
         base_channels: int = 64,
         layers: tuple[int, int, int, int] = (2, 2, 2, 2),
         dropout_prob: float = 0.0,
@@ -104,7 +116,7 @@ class ResNetEncoder(nn.Module):
     ) -> None:
         super().__init__()
         self.conv1 = nn.Conv2d(
-            base_channels,
+            in_channels,
             base_channels,
             kernel_size=3,
             stride=1,
@@ -267,6 +279,7 @@ class MAEResNet(nn.Module):
         normalized_layers = tuple(int(layer) for layer in layers)
         effective_in_channels = in_channels * input_patch_size * input_patch_size
         self.encoder = ResNetEncoder(
+            in_channels=effective_in_channels,
             base_channels=base_channels,
             layers=cast(tuple[int, int, int, int], normalized_layers),
             dropout_prob=dropout_prob,
@@ -275,7 +288,6 @@ class MAEResNet(nn.Module):
             base_channels=base_channels,
             out_channels=effective_in_channels,
         )
-        self.input_proj = nn.Conv2d(effective_in_channels, base_channels, kernel_size=1, bias=False)
         self.fc = nn.Linear(base_channels * 8, num_classes)
 
     def _encode(
@@ -285,7 +297,6 @@ class MAEResNet(nn.Module):
         return_block_outputs: bool = False,
     ) -> tuple[dict[str, Tensor], dict[str, list[Tensor]]] | dict[str, Tensor]:
         x = bhwc_to_bchw(x_bhwc)
-        x = self.input_proj(x)
         return self.encoder(x, return_block_outputs=return_block_outputs)
 
     def forward(

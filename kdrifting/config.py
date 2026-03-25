@@ -13,7 +13,8 @@ def load_yaml_config(path: str | Path) -> dict[str, Any]:
     config_path = Path(path).expanduser().resolve()
     if not config_path.is_file():
         raise FileNotFoundError(f"Config file not found: {config_path}")
-    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    yaml_module = cast(Any, yaml)
+    raw = cast(object, yaml_module.safe_load(config_path.read_text(encoding="utf-8")))
     if raw is None:
         return {}
     if not isinstance(raw, dict):

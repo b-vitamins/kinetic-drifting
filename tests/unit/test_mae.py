@@ -52,3 +52,18 @@ def test_mae_forward_and_activations_have_expected_shapes() -> None:
     assert metrics["accuracy"].shape == (2,)
     assert "conv1" in activations
     assert activations["conv1"].ndim == 3
+
+
+def test_mae_encoder_accepts_patched_input_channels_directly() -> None:
+    model = MAEResNet(
+        num_classes=10,
+        in_channels=3,
+        base_channels=16,
+        patch_size=2,
+        layers=(1, 1, 1, 1),
+        input_patch_size=2,
+    )
+
+    assert model.encoder.conv1.weight.shape == (16, 12, 3, 3)
+    assert not any(key.startswith("input_proj.") for key in model.state_dict())
+    assert not any(key.startswith("encoder.stages.0.0.proj_") for key in model.state_dict())

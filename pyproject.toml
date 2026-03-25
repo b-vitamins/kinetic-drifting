@@ -26,6 +26,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "flax>=0.10.4",
+  "jax[cpu]>=0.4.36",
+  "optax>=0.2.5",
+  "orbax-checkpoint>=0.11.0",
   "pre-commit>=4.0.1",
   "pyright>=1.1.389",
   "pytest>=8.3.3",
@@ -35,6 +39,12 @@ dev = [
 hf = [
   "diffusers>=0.30.0",
   "transformers>=4.45.0",
+]
+jax = [
+  "flax>=0.10.4",
+  "jax[cpu]>=0.4.36",
+  "optax>=0.2.5",
+  "orbax-checkpoint>=0.11.0",
 ]
 
 [project.scripts]
@@ -85,6 +95,12 @@ known-first-party = ["kdrifting"]
 [tool.pyright]
 include = ["kdrifting", "tests"]
 exclude = [".git", ".pytest_cache", ".ruff_cache", ".venv"]
+venvPath = "."
+venv = ".venv"
+extraPaths = [
+  ".venv/lib/python3.11/site-packages",
+  "/run/current-system/profile/lib/python3.11/site-packages",
+]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = "none"
@@ -93,7 +109,6 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 reportUnknownLambdaType = "error"
 reportUnknownParameterType = "error"
-reportUnknownNamedParameterType = "error"
 reportMissingParameterType = "error"
 reportMissingTypeArgument = "error"
 reportImportCycles = "error"
