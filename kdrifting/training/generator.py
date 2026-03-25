@@ -48,6 +48,31 @@ def _sample_cfg(
     return torch.where(frac2 < no_cfg_frac, torch.ones_like(cfg), cfg)
 
 
+@torch.no_grad()
+def generate_step(
+    model: torch.nn.Module,
+    *,
+    labels: Tensor,
+    postprocess_fn: Callable[[Tensor], Tensor],
+    base_seed: int,
+    step: int,
+    cfg_scale: float = 1.0,
+) -> Tensor:
+    """Generate one postprocessed batch from class labels."""
+    generator = _step_generator(base_seed, step, labels.device)
+    model.eval()
+    outputs = model(
+        labels,
+        cfg_scale=cfg_scale,
+        deterministic=True,
+        generator=generator,
+    )
+    samples = outputs["samples"]
+    if not isinstance(samples, Tensor):
+        raise TypeError("Expected generator forward to return a tensor under 'samples'.")
+    return postprocess_fn(samples)
+
+
 def train_step(
     state: TrainState,
     *,

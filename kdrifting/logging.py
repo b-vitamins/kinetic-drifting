@@ -186,7 +186,15 @@ class NullLogger:
     """No-op logger implementation."""
 
     @staticmethod
+    def set_step(step: int) -> None:
+        del step
+
+    @staticmethod
     def log_dict(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+    @staticmethod
+    def log_dict_dir(*args: object, **kwargs: object) -> None:
         del args, kwargs
 
     @staticmethod

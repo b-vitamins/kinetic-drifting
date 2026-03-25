@@ -11,7 +11,9 @@ from torch import Tensor
 from kdrifting.training.state import TrainState
 
 BatchDict = dict[str, Tensor]
-PreprocessFn = Callable[[BatchDict], BatchDict]
+RawBatch = tuple[Tensor, Tensor]
+InputBatch = BatchDict | RawBatch
+PreprocessFn = Callable[..., BatchDict]
 
 
 def input_dict(batch: BatchDict) -> dict[str, Tensor]:
@@ -27,7 +29,7 @@ def _step_generator(base_seed: int, step: int, device: torch.device) -> torch.Ge
 
 def train_step(
     state: TrainState,
-    batch: BatchDict,
+    batch: InputBatch,
     *,
     base_seed: int,
     forward_dict: dict[str, Any],
@@ -65,7 +67,7 @@ def train_step(
 @torch.no_grad()
 def eval_step(
     model: torch.nn.Module,
-    batch: BatchDict,
+    batch: InputBatch,
     *,
     base_seed: int,
     step: int,
