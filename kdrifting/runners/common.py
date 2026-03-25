@@ -11,7 +11,7 @@ import torch
 from torch import Tensor
 from torch.optim import Optimizer
 
-from kdrifting.checkpointing import restore_checkpoint
+from kdrifting.checkpointing import restore_checkpoint, restore_external_checkpoint
 from kdrifting.distributed import world_size
 from kdrifting.hf import load_generator_model, load_mae_model
 from kdrifting.logging import WandbLogger
@@ -108,6 +108,8 @@ def create_or_restore_state(
     """Create a train state, restore checkpoints, and optionally seed from an artifact."""
     state = TrainState.create(model.to(device), optimizer, ema_decay=ema_decay)
     state = restore_checkpoint(state, workdir=workdir)
+    if state.step == 0 and init_from:
+        state = restore_external_checkpoint(state, init_from=init_from, kind=kind)
     move_optimizer_state_to_device(state.optimizer, device)
     return maybe_initialize_state(
         state,

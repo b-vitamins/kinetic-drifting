@@ -6,6 +6,7 @@ import importlib
 import json
 import re
 import warnings
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -94,6 +95,36 @@ def load_jax_init_entry(artifact_dir: Path) -> tuple[Any, dict[str, Any]]:
     raise ValueError(f"Could not restore JAX params from {artifact_dir}")
 
 
+def resolve_jax_checkpoint_dir(path: Path) -> Path:
+    """Resolve a run root or checkpoint directory to the actual JAX checkpoint dir."""
+    candidate = path.resolve()
+    if candidate.name == "checkpoints" and candidate.is_dir():
+        return candidate
+
+    checkpoints_dir = candidate / "checkpoints"
+    if checkpoints_dir.is_dir():
+        return checkpoints_dir
+
+    raise FileNotFoundError(f"Could not find a JAX checkpoint directory under {candidate}")
+
+
+def load_jax_checkpoint_entry(checkpoint_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load a full JAX checkpoint payload plus sibling metadata."""
+    checkpoint_dir = resolve_jax_checkpoint_dir(checkpoint_path)
+    metadata = read_jax_metadata(checkpoint_dir)
+    checkpoints = _import_flax_checkpoints()
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Sharding info not provided when restoring\\..*",
+            category=UserWarning,
+        )
+        restored = checkpoints.restore_checkpoint(str(checkpoint_dir), target=None, step=None)
+    if not isinstance(restored, dict):
+        raise ValueError(f"Could not restore a JAX checkpoint payload from {checkpoint_dir}")
+    return cast(dict[str, Any], restored), metadata
+
+
 def _to_numpy(value: Any) -> np.ndarray[Any, Any]:
     array = np.asarray(value)
     if str(array.dtype) == "bfloat16":
@@ -120,6 +151,32 @@ def _convert_leaf(source_key: str, source_value: Any, target_value: Tensor) -> T
     return torch.tensor(copied, dtype=target_value.dtype)
 
 
+def _convert_tree(
+    flat_params: dict[str, Any],
+    target_tensors: Mapping[str, Tensor],
+    *,
+    target_key_fn: Any,
+    strict: bool,
+    missing_label: str,
+) -> dict[str, Tensor]:
+    converted: dict[str, Tensor] = {}
+    for source_key, source_value in flat_params.items():
+        target_key = target_key_fn(source_key)
+        if target_key is None:
+            continue
+        if target_key not in target_tensors:
+            raise KeyError(f"Unmapped JAX parameter: {source_key} -> {target_key}")
+        if target_key in converted:
+            raise KeyError(f"Duplicate target parameter mapping: {target_key}")
+        converted[target_key] = _convert_leaf(source_key, source_value, target_tensors[target_key])
+
+    if strict:
+        missing = sorted(set(target_tensors) - set(converted))
+        if missing:
+            raise KeyError(f"Missing converted {missing_label}: {missing}")
+    return converted
+
+
 def _mae_target_key(source_key: str) -> str:
     key = re.sub(r"encoder\.stages_(\d+)\.layers_(\d+)", r"encoder.stages.\1.\2", source_key)
     key = re.sub(
@@ -138,22 +195,26 @@ def _mae_target_key(source_key: str) -> str:
 def convert_mae_jax_params(params: Any, model: MAEResNet) -> dict[str, Tensor]:
     """Convert upstream JAX MAE params to a PyTorch state dict."""
     flat_params = _flatten_tree(params)
-    target_state = model.state_dict()
-    converted: dict[str, Tensor] = {}
+    return _convert_tree(
+        flat_params,
+        model.state_dict(),
+        target_key_fn=_mae_target_key,
+        strict=True,
+        missing_label="MAE parameters",
+    )
 
-    for source_key, source_value in flat_params.items():
-        target_key = _mae_target_key(source_key)
-        if target_key not in target_state:
-            raise KeyError(f"Unmapped MAE JAX parameter: {source_key} -> {target_key}")
-        if target_key in converted:
-            raise KeyError(f"Duplicate MAE target parameter mapping: {target_key}")
-        converted[target_key] = _convert_leaf(source_key, source_value, target_state[target_key])
 
-    missing = sorted(set(target_state) - set(converted))
-    if missing:
-        raise KeyError(f"Missing converted MAE parameters: {missing}")
-
-    return converted
+def convert_mae_jax_optimizer_tensors(params: Any, model: MAEResNet) -> dict[str, Tensor]:
+    """Convert MAE-shaped JAX optimizer tensors into torch named-parameter tensors."""
+    flat_params = _flatten_tree(params)
+    named_parameters = dict(model.named_parameters())
+    return _convert_tree(
+        flat_params,
+        named_parameters,
+        target_key_fn=_mae_target_key,
+        strict=True,
+        missing_label="MAE optimizer tensors",
+    )
 
 
 def _generator_target_key(source_key: str) -> str | None:
@@ -273,23 +334,24 @@ def _validate_generator_pos_embed(flat_params: dict[str, Any], model: DitGen) ->
 def convert_generator_jax_params(params: Any, model: DitGen) -> dict[str, Tensor]:
     """Convert upstream JAX generator params to a PyTorch state dict."""
     flat_params = _flatten_tree(params)
-    target_state = model.state_dict()
-    converted: dict[str, Tensor] = {}
-
     _validate_generator_pos_embed(flat_params, model)
+    return _convert_tree(
+        flat_params,
+        model.state_dict(),
+        target_key_fn=_generator_target_key,
+        strict=True,
+        missing_label="generator parameters",
+    )
 
-    for source_key, source_value in flat_params.items():
-        target_key = _generator_target_key(source_key)
-        if target_key is None:
-            continue
-        if target_key not in target_state:
-            raise KeyError(f"Unmapped generator JAX parameter: {source_key} -> {target_key}")
-        if target_key in converted:
-            raise KeyError(f"Duplicate generator target parameter mapping: {target_key}")
-        converted[target_key] = _convert_leaf(source_key, source_value, target_state[target_key])
 
-    missing = sorted(set(target_state) - set(converted))
-    if missing:
-        raise KeyError(f"Missing converted generator parameters: {missing}")
-
-    return converted
+def convert_generator_jax_optimizer_tensors(params: Any, model: DitGen) -> dict[str, Tensor]:
+    """Convert generator-shaped JAX optimizer tensors into torch named-parameter tensors."""
+    flat_params = _flatten_tree(params)
+    named_parameters = dict(model.named_parameters())
+    return _convert_tree(
+        flat_params,
+        named_parameters,
+        target_key_fn=_generator_target_key,
+        strict=True,
+        missing_label="generator optimizer tensors",
+    )

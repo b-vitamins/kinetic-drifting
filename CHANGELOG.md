@@ -38,3 +38,5 @@ Commits for commit subjects.
   schedule to the optimizer on every step instead of only at initialization.
 - Added upstream JAX train-step parity tests for deterministic toy MAE and
   generator models, covering schedule-driven parameter and EMA updates.
+- Added external torch and JAX checkpoint restore for training state bootstraps,
+  including conversion of upstream Optax AdamW moments into torch AdamW state.
