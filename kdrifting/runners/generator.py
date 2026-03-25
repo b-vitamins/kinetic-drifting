@@ -9,7 +9,11 @@ from typing import Any, cast
 import torch
 from tqdm.auto import tqdm
 
-from kdrifting.checkpointing import save_checkpoint, save_params_ema_artifact
+from kdrifting.checkpointing import (
+    restore_checkpoint_extra_state,
+    save_checkpoint,
+    save_params_ema_artifact,
+)
 from kdrifting.config import load_yaml_config
 from kdrifting.data import get_postprocess_fn, infinite_sampler
 from kdrifting.eval.generation import evaluate_fid
@@ -42,6 +46,36 @@ def _sample_batch_indices(
     generator = torch.Generator(device=device.type if device.type != "mps" else "cpu")
     generator.manual_seed(seed)
     return torch.randperm(batch_size, generator=generator, device=device)[:target_size]
+
+
+def _memory_bank_extra_state(
+    positive_bank: ArrayMemoryBank,
+    negative_bank: ArrayMemoryBank,
+) -> dict[str, Any]:
+    return {
+        "memory_bank_positive": positive_bank.state_dict(),
+        "memory_bank_negative": negative_bank.state_dict(),
+    }
+
+
+def _restore_memory_banks(
+    *,
+    workdir: str,
+    positive_bank: ArrayMemoryBank,
+    negative_bank: ArrayMemoryBank,
+) -> bool:
+    extra_state = restore_checkpoint_extra_state(workdir=workdir)
+    if extra_state is None:
+        return False
+
+    positive_state = extra_state.get("memory_bank_positive")
+    negative_state = extra_state.get("memory_bank_negative")
+    if not isinstance(positive_state, dict) or not isinstance(negative_state, dict):
+        return False
+
+    positive_bank.load_state_dict(cast(dict[str, Any], positive_state))
+    negative_bank.load_state_dict(cast(dict[str, Any], negative_state))
+    return True
 
 
 @torch.no_grad()
@@ -152,8 +186,25 @@ def train_generator(
     train_iter = infinite_sampler(train_loader, state.step)
     progress = tqdm(total=total_steps, initial=state.step, disable=False)
     initial_step = state.step
-    memory_bank_positive = ArrayMemoryBank(num_classes=1000, max_size=positive_bank_size)
-    memory_bank_negative = ArrayMemoryBank(num_classes=1, max_size=negative_bank_size)
+    memory_bank_positive = ArrayMemoryBank(
+        num_classes=1000,
+        max_size=positive_bank_size,
+        seed=seed,
+    )
+    memory_bank_negative = ArrayMemoryBank(
+        num_classes=1,
+        max_size=negative_bank_size,
+        seed=seed + 1,
+    )
+    restored_memory_banks = False
+    if initial_step > 0:
+        restored_memory_banks = _restore_memory_banks(
+            workdir=workdir,
+            positive_bank=memory_bank_positive,
+            negative_bank=memory_bank_negative,
+        )
+        if restored_memory_banks:
+            log_for_0("Restored generator memory banks from %s", workdir)
 
     global_train_batch = int(train_batch_size)
     local_train_batch = per_process_batch_size(global_train_batch)
@@ -165,8 +216,9 @@ def train_generator(
         logger.set_step(step_index)
 
         goal = push_per_step
-        if initial_step > 0 and step_index == initial_step:
+        if initial_step > 0 and step_index == initial_step and not restored_memory_banks:
             goal = push_per_step * push_at_resume
+            log_for_0("Generator resume warmup: refilling memory bank with goal=%d", goal)
 
         pushed = 0
         last_batch: dict[str, torch.Tensor] | None = None
@@ -234,7 +286,16 @@ def train_generator(
         progress.update(1)
 
         if state.step % save_per_step == 0 or state.step == total_steps:
-            save_checkpoint(state, workdir=workdir, keep=keep_last, keep_every=keep_every)
+            save_checkpoint(
+                state,
+                workdir=workdir,
+                keep=keep_last,
+                keep_every=keep_every,
+                extra_state=_memory_bank_extra_state(
+                    memory_bank_positive,
+                    memory_bank_negative,
+                ),
+            )
             save_params_ema_artifact(
                 state,
                 workdir=workdir,

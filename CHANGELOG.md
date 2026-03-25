@@ -26,3 +26,5 @@ Commits for commit subjects.
   including numerical parity tests against the upstream JAX modules.
 - Added a source-compatible `eval-fid` CLI path on top of the torch metric
   stack, alongside the existing preview-style sampling command.
+- Hardened resumable generator training by checkpointing memory-bank state,
+  restoring it on resume, and making checkpoint/artifact writes rank-safe.

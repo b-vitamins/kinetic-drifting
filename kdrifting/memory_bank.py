@@ -22,15 +22,18 @@ class ArrayMemoryBank:
 
     num_classes: int = 1000
     max_size: int = 64
+    seed: int | None = None
     dtype: np.dtype[Any] = field(default_factory=lambda: np.dtype(np.float32))
     bank: npt.NDArray[Any] | None = field(default=None, init=False)
     feature_shape: tuple[int, ...] | None = field(default=None, init=False)
     ptr: np.ndarray = field(init=False)
     count: np.ndarray = field(init=False)
+    _rng: np.random.Generator = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.ptr = np.zeros(self.num_classes, dtype=np.int32)
         self.count = np.zeros(self.num_classes, dtype=np.int32)
+        self._rng = np.random.default_rng(self.seed)
 
     def _init_bank(self, sample_shape: tuple[int, ...]) -> None:
         self.feature_shape = tuple(sample_shape)
@@ -75,7 +78,7 @@ class ArrayMemoryBank:
             if valid <= 0:
                 sample_indices[index] = np.zeros((n_samples,), dtype=np.int32)
             else:
-                sample_indices[index] = np.random.choice(
+                sample_indices[index] = self._rng.choice(
                     valid,
                     n_samples,
                     replace=(valid < n_samples),
@@ -83,3 +86,33 @@ class ArrayMemoryBank:
 
         out = self.bank[labels_np[:, None], sample_indices]
         return torch.as_tensor(out, device=device)
+
+    def state_dict(self) -> dict[str, Any]:
+        """Serialize the memory bank contents and RNG state."""
+        return {
+            "num_classes": self.num_classes,
+            "max_size": self.max_size,
+            "seed": self.seed,
+            "dtype": self.dtype.str,
+            "bank": self.bank,
+            "feature_shape": self.feature_shape,
+            "ptr": self.ptr.copy(),
+            "count": self.count.copy(),
+            "rng_state": self._rng.bit_generator.state,
+        }
+
+    def load_state_dict(self, payload: dict[str, Any]) -> None:
+        """Restore the memory bank contents and RNG state."""
+        self.num_classes = int(payload["num_classes"])
+        self.max_size = int(payload["max_size"])
+        seed = payload.get("seed")
+        self.seed = None if seed is None else int(seed)
+        self.dtype = np.dtype(str(payload["dtype"]))
+        feature_shape = payload.get("feature_shape")
+        self.feature_shape = None if feature_shape is None else tuple(int(v) for v in feature_shape)
+        bank = payload.get("bank")
+        self.bank = None if bank is None else np.asarray(bank, dtype=self.dtype)
+        self.ptr = np.asarray(payload["ptr"], dtype=np.int32).copy()
+        self.count = np.asarray(payload["count"], dtype=np.int32).copy()
+        self._rng = np.random.default_rng()
+        self._rng.bit_generator.state = payload["rng_state"]
