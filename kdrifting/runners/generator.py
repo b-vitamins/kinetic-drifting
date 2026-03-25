@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import Any, cast
 
 import torch
@@ -10,7 +11,8 @@ from tqdm.auto import tqdm
 
 from kdrifting.checkpointing import save_checkpoint, save_params_ema_artifact
 from kdrifting.config import load_yaml_config
-from kdrifting.data import epoch0_sampler, get_postprocess_fn, infinite_sampler
+from kdrifting.data import get_postprocess_fn, infinite_sampler
+from kdrifting.eval.generation import evaluate_fid
 from kdrifting.features import build_feature_activation
 from kdrifting.logging import log_for_0
 from kdrifting.memory_bank import ArrayMemoryBank
@@ -18,6 +20,7 @@ from kdrifting.model_builder import build_model_dict
 from kdrifting.models.generator import DitGen
 from kdrifting.runners.common import (
     PreprocessFn,
+    RawBatch,
     create_or_restore_state,
     per_process_batch_size,
     prepare_preprocess_fn,
@@ -25,6 +28,8 @@ from kdrifting.runners.common import (
 )
 from kdrifting.training.generator import generate_step, train_step
 from kdrifting.training.state import TrainState
+
+GeneratorEvalFn = Callable[..., dict[str, float]]
 
 
 def _sample_batch_indices(
@@ -39,13 +44,6 @@ def _sample_batch_indices(
     return torch.randperm(batch_size, generator=generator, device=device)[:target_size]
 
 
-def _preview_metrics(images: torch.Tensor) -> dict[str, float]:
-    return {
-        "sample_mean": float(images.detach().float().mean().item()),
-        "sample_std": float(images.detach().float().std(unbiased=False).item()),
-    }
-
-
 @torch.no_grad()
 def evaluate_generator_model(
     model: torch.nn.Module,
@@ -55,28 +53,44 @@ def evaluate_generator_model(
     postprocess_fn: Any,
     logger: Any,
     base_seed: int,
-    step: int,
+    dataset_name: str,
+    num_samples: int,
     cfg_scale: float,
+    log_folder: str,
+    log_prefix: str,
+    device: torch.device,
+    eval_prc_recall: bool,
+    eval_isc: bool,
+    eval_fid_enabled: bool,
+    evaluate_fn: GeneratorEvalFn | None = None,
 ) -> dict[str, float]:
-    """Generate one preview batch and log generated and real images."""
-    raw_batch = next(iter(epoch0_sampler(eval_loader)))
-    prepared = preprocess_fn(raw_batch)
-    labels = prepared["labels"]
-    generated = generate_step(
-        model,
-        labels=labels,
-        postprocess_fn=postprocess_fn,
-        base_seed=base_seed,
-        step=step,
-        cfg_scale=cfg_scale,
+    """Evaluate a generator model with source-compatible release metrics."""
+    metric_fn = evaluate_fn or evaluate_fid
+
+    def gen_func(batch: RawBatch, eval_index: int) -> torch.Tensor:
+        labels = preprocess_fn(batch)["labels"]
+        return generate_step(
+            model,
+            labels=labels,
+            postprocess_fn=postprocess_fn,
+            base_seed=base_seed,
+            step=eval_index,
+            cfg_scale=cfg_scale,
+        )
+
+    return metric_fn(
+        dataset_name=dataset_name,
+        gen_func=gen_func,
+        eval_loader=eval_loader,
+        logger=logger,
+        num_samples=num_samples,
+        log_folder=log_folder,
+        log_prefix=log_prefix,
+        eval_prc_recall=eval_prc_recall,
+        eval_isc=eval_isc,
+        eval_fid=eval_fid_enabled,
+        device=device,
     )
-    real = postprocess_fn(prepared["images"])
-    prefix = f"eval/cfg_{cfg_scale:g}"
-    logger.log_image(f"{prefix}/generated", generated[:64])
-    logger.log_image(f"{prefix}/real", real[:64])
-    metrics = _preview_metrics(generated)
-    metrics["cfg_scale"] = cfg_scale
-    return metrics
 
 
 def train_generator(
@@ -91,12 +105,14 @@ def train_generator(
     postprocess_fn: Any,
     feature_apply: Any,
     model_config: dict[str, Any],
+    dataset_name: str,
     workdir: str,
     device: torch.device,
     train_batch_size: int,
     total_steps: int = 100000,
     save_per_step: int = 10000,
     eval_per_step: int = 5000,
+    eval_samples: int = 50000,
     ema_decay: float = 0.999,
     seed: int = 42,
     pos_per_sample: int = 32,
@@ -113,6 +129,10 @@ def train_generator(
     init_from: str = "",
     push_per_step: int = 0,
     push_at_resume: int = 3000,
+    eval_prc_recall: bool = False,
+    eval_isc: bool = True,
+    eval_fid_enabled: bool = True,
+    evaluate_fn: GeneratorEvalFn | None = None,
 ) -> TrainState:
     """Run the generator training loop."""
     prepared_preprocess = prepare_preprocess_fn(preprocess_fn, device)
@@ -223,7 +243,12 @@ def train_generator(
             )
 
         if state.step % eval_per_step == 0 or state.step in {1, total_steps}:
-            eval_cfgs = [cfg_values[0]] if state.step == 1 else cfg_values
+            is_sanity = state.step == 1
+            sample_goal = 500 if is_sanity else eval_samples
+            folder_prefix = "sanity" if is_sanity else "CFG"
+            round_best_fid = float("inf")
+            round_best_cfg = cfg_values[0]
+            eval_cfgs = [cfg_values[0]] if is_sanity else cfg_values
             for cfg_scale in eval_cfgs:
                 eval_metrics = evaluate_generator_model(
                     state.ema_model,
@@ -232,10 +257,34 @@ def train_generator(
                     postprocess_fn=postprocess_fn,
                     logger=logger,
                     base_seed=seed,
-                    step=state.step,
+                    dataset_name=dataset_name,
+                    num_samples=sample_goal,
                     cfg_scale=cfg_scale,
+                    log_folder=f"{folder_prefix}{cfg_scale:g}",
+                    log_prefix=f"EMA_{state.ema_decay:g}",
+                    device=device,
+                    eval_prc_recall=eval_prc_recall,
+                    eval_isc=eval_isc,
+                    eval_fid_enabled=eval_fid_enabled,
+                    evaluate_fn=evaluate_fn,
                 )
-                logger.log_dict_dir(f"eval_cfg_{cfg_scale:g}", eval_metrics)
+                fid_value = eval_metrics.get("fid", float("inf"))
+                if fid_value < round_best_fid:
+                    round_best_fid = fid_value
+                    round_best_cfg = cfg_scale
+            if not is_sanity and eval_fid_enabled:
+                log_for_0(
+                    "best_fid=%.4f best_cfg=%.1f (step=%d)",
+                    round_best_fid,
+                    round_best_cfg,
+                    state.step,
+                )
+                logger.log_dict(
+                    {
+                        "best_fid": round_best_fid,
+                        "best_cfg": round_best_cfg,
+                    },
+                )
 
     progress.close()
     logger.finish()
@@ -279,6 +328,7 @@ def train_generator_from_config(
         postprocess_fn=model_dict["postprocess_fn"],
         feature_apply=activation_fn,
         model_config=dict(config["model"]),
+        dataset_name=str(model_dict["dataset_name"]),
         workdir=workdir,
         device=runtime_device,
         **train_kwargs,

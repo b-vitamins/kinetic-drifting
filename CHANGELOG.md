@@ -18,3 +18,7 @@ Commits for commit subjects.
   checkpoint/artifact save wiring for the top-level training loops.
 - Added generator inference helpers and top-level CLI subcommands for training
   and sampling.
+- Added a torch-native release-metric stack for FID, Inception Score, and
+  precision/recall using the FID-specific Inception V3 weights.
+- Wired generator evaluation to the source-compatible sanity/full metric flow
+  instead of the earlier preview-only placeholder.

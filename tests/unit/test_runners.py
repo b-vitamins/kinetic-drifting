@@ -40,6 +40,10 @@ def _postprocess(images: Tensor) -> Tensor:
     return ((images + 1.0) / 2.0).permute(0, 3, 1, 2).contiguous()
 
 
+def _fake_eval(**_: object) -> dict[str, float]:
+    return {"fid": 1.25, "isc_mean": 2.0, "isc_std": 0.1}
+
+
 def test_train_mae_runner_saves_checkpoints_and_artifacts(tmp_path: Path) -> None:
     model = MAEResNet(
         num_classes=5,
@@ -120,12 +124,14 @@ def test_train_generator_runner_saves_checkpoints_and_artifacts(tmp_path: Path) 
         postprocess_fn=_postprocess,
         feature_apply=activation_fn,
         model_config={"cond_dim": 16, "num_classes": 5, "input_size": 8, "in_channels": 3},
+        dataset_name="imagenet256",
         workdir=str(tmp_path),
         device=torch.device("cpu"),
         train_batch_size=2,
         total_steps=2,
         save_per_step=1,
         eval_per_step=1,
+        eval_samples=4,
         ema_decay=0.9,
         seed=11,
         pos_per_sample=2,
@@ -139,6 +145,7 @@ def test_train_generator_runner_saves_checkpoints_and_artifacts(tmp_path: Path) 
         keep_last=2,
         push_per_step=2,
         push_at_resume=2,
+        evaluate_fn=_fake_eval,
     )
 
     metadata = json.loads((tmp_path / "params_ema" / "metadata.json").read_text(encoding="utf-8"))
