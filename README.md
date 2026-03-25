@@ -43,4 +43,7 @@ The package exposes a single `kdrifting` command:
 kdrifting train-mae --config path/to/mae.yaml --workdir runs/mae
 kdrifting train-gen --config path/to/gen.yaml --workdir runs/gen
 kdrifting infer --init-from runs/gen/params_ema --workdir runs/infer
+kdrifting eval-fid --init-from runs/gen/params_ema --workdir runs/eval
+kdrifting export-model --kind gen --init-from hf://release-gen --workdir exports/gen
+kdrifting export-checkpoint --kind gen --init-from /path/to/jax_run --config gen.yaml --workdir exports/gen-run
 ```

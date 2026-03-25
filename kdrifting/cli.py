@@ -96,6 +96,50 @@ def build_parser() -> argparse.ArgumentParser:
     fid_parser.add_argument("--wandb-entity", default=None, help="Optional wandb entity.")
     fid_parser.add_argument("--wandb-project", default="release-fid", help="wandb project name.")
     fid_parser.add_argument("--wandb-name", default=None, help="Optional wandb run name.")
+
+    export_model_parser = subparsers.add_parser(
+        "export-model",
+        help="Export a source artifact into canonical torch EMA form.",
+    )
+    export_model_parser.add_argument(
+        "--kind",
+        choices=("mae", "gen"),
+        required=True,
+        help="Model family to export.",
+    )
+    export_model_parser.add_argument(
+        "--init-from",
+        required=True,
+        help="Local or hf:// model source.",
+    )
+    export_model_parser.add_argument("--workdir", required=True, help="Output directory.")
+
+    export_checkpoint_parser = subparsers.add_parser(
+        "export-checkpoint",
+        help="Convert an external training checkpoint into native torch format.",
+    )
+    export_checkpoint_parser.add_argument(
+        "--kind",
+        choices=("mae", "gen"),
+        required=True,
+        help="Model family to export.",
+    )
+    export_checkpoint_parser.add_argument(
+        "--init-from",
+        required=True,
+        help="Local torch or JAX training checkpoint source.",
+    )
+    export_checkpoint_parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to the matching YAML config used to rebuild the optimizer and model.",
+    )
+    export_checkpoint_parser.add_argument("--workdir", required=True, help="Output directory.")
+    export_checkpoint_parser.add_argument(
+        "--device",
+        default="cpu",
+        help="Torch device for temporary reconstruction, or 'auto'.",
+    )
     return parser
 
 
@@ -162,6 +206,31 @@ def main() -> None:
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
             wandb_name=args.wandb_name,
+        )
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "export-model":
+        from kdrifting.export import export_model_artifact
+
+        result = export_model_artifact(
+            init_from=args.init_from,
+            kind=args.kind,
+            workdir=args.workdir,
+        )
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "export-checkpoint":
+        from kdrifting.config import load_yaml_config
+        from kdrifting.export import export_training_checkpoint
+
+        result = export_training_checkpoint(
+            init_from=args.init_from,
+            config=load_yaml_config(args.config),
+            kind=args.kind,
+            workdir=args.workdir,
+            device=args.device,
         )
         print(json.dumps(result, indent=2))
         return

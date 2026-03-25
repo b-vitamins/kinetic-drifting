@@ -38,6 +38,31 @@ def test_cli_parser_accepts_eval_fid_subcommand() -> None:
     assert args.eval_batch_size == 2048
 
 
+def test_cli_parser_accepts_export_subcommands() -> None:
+    model_args = build_parser().parse_args(
+        ["export-model", "--kind", "gen", "--init-from", "artifact", "--workdir", "out"],
+    )
+    checkpoint_args = build_parser().parse_args(
+        [
+            "export-checkpoint",
+            "--kind",
+            "mae",
+            "--init-from",
+            "checkpoint",
+            "--config",
+            "config.yaml",
+            "--workdir",
+            "out",
+        ],
+    )
+
+    assert model_args.command == "export-model"
+    assert model_args.kind == "gen"
+    assert checkpoint_args.command == "export-checkpoint"
+    assert checkpoint_args.kind == "mae"
+    assert checkpoint_args.device == "cpu"
+
+
 def test_cli_main_dispatches_inference(
     monkeypatch: MonkeyPatch,
     capsys: CaptureFixture[str],
@@ -108,3 +133,88 @@ def test_cli_main_dispatches_fid_eval(
     assert captured["cfg_scale"] == 1.5
     assert captured["num_samples"] == 128
     assert json.loads(capsys.readouterr().out)["fid"] == 1.25
+
+
+def test_cli_main_dispatches_export_model(
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_export_model_artifact(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"artifact_dir": "/tmp/out/params_ema", "step": 7}
+
+    import kdrifting.export as export_module
+
+    monkeypatch.setattr(export_module, "export_model_artifact", fake_export_model_artifact)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "kdrifting",
+            "export-model",
+            "--kind",
+            "gen",
+            "--init-from",
+            "artifact",
+            "--workdir",
+            "out",
+        ],
+    )
+
+    main()
+
+    assert captured["kind"] == "gen"
+    assert captured["init_from"] == "artifact"
+    assert json.loads(capsys.readouterr().out)["step"] == 7
+
+
+def test_cli_main_dispatches_export_checkpoint(
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_load_yaml_config(path: str) -> dict[str, Any]:
+        assert path == "config.yaml"
+        return {"model": {}, "dataset": {}, "optimizer": {}, "train": {}}
+
+    def fake_export_training_checkpoint(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"checkpoint_path": "/tmp/out/checkpoints/step_00000007.pt", "step": 7}
+
+    import kdrifting.config as config_module
+    import kdrifting.export as export_module
+
+    monkeypatch.setattr(config_module, "load_yaml_config", fake_load_yaml_config)
+    monkeypatch.setattr(
+        export_module,
+        "export_training_checkpoint",
+        fake_export_training_checkpoint,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "kdrifting",
+            "export-checkpoint",
+            "--kind",
+            "mae",
+            "--init-from",
+            "checkpoint",
+            "--config",
+            "config.yaml",
+            "--workdir",
+            "out",
+            "--device",
+            "cpu",
+        ],
+    )
+
+    main()
+
+    assert captured["kind"] == "mae"
+    assert captured["init_from"] == "checkpoint"
+    assert captured["device"] == "cpu"
+    assert json.loads(capsys.readouterr().out)["step"] == 7

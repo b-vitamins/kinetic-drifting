@@ -43,3 +43,13 @@ Commits for commit subjects.
 - Made the generator positional embedding trainable to match upstream JAX
   semantics and extended parity coverage to resumed real-model MAE and
   generator training traces driven from imported JAX checkpoints.
+- Added first-class export helpers and CLI commands for converting local or
+  `hf://` model sources into canonical torch EMA artifacts and for converting
+  external torch or JAX training checkpoints into native torch checkpoint
+  bundles.
+- Fixed artifact metadata written from config-driven training and checkpoint
+  export so `model_config` always includes `num_classes`, which makes saved
+  MAE and generator bundles fully reloadable through the public loader.
+- Added round-trip parity coverage for exported JAX model artifacts and
+  converted JAX training checkpoints, including full optimizer-state resume
+  comparisons after conversion.
