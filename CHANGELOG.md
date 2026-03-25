@@ -34,3 +34,7 @@ Commits for commit subjects.
   for local MAE and generator loading, using EMA weights plus sibling metadata.
 - Added direct upstream JAX parity coverage for the drift loss, including
   value and gradient checks on fixed feature tensors.
+- Fixed MAE and generator train steps to apply the configured learning-rate
+  schedule to the optimizer on every step instead of only at initialization.
+- Added upstream JAX train-step parity tests for deterministic toy MAE and
+  generator models, covering schedule-driven parameter and EMA updates.

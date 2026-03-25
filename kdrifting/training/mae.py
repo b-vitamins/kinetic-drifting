@@ -8,7 +8,7 @@ from typing import Any
 import torch
 from torch import Tensor
 
-from kdrifting.training.state import TrainState
+from kdrifting.training.state import TrainState, set_optimizer_learning_rate
 
 BatchDict = dict[str, Tensor]
 RawBatch = tuple[Tensor, Tensor]
@@ -40,11 +40,14 @@ def train_step(
     """Run one MAE optimization step."""
     batch = preprocess_fn(batch)
     generator = _step_generator(base_seed, state.step, batch["images"].device)
+    current_lr = float(learning_rate_fn(state.step))
+    set_optimizer_learning_rate(state.optimizer, current_lr)
     state.model.train()
     state.optimizer.zero_grad(set_to_none=True)
     loss, metrics = state.model(
         **input_dict(batch),
         **forward_dict,
+        train=True,
         generator=generator,
     )
     loss_mean = loss.mean()
@@ -54,13 +57,12 @@ def train_step(
     state.increment_step()
     state.update_ema()
 
-    lr = float(learning_rate_fn(state.step - 1))
     metrics_out = {
         key: float(value.detach().float().mean().item()) for key, value in metrics.items()
     }
     metrics_out["loss"] = float(loss_mean.detach().item())
     metrics_out["g_norm"] = float(grad_norm.detach().item())
-    metrics_out["lr"] = lr
+    metrics_out["lr"] = current_lr
     return state, metrics_out
 
 

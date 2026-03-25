@@ -11,6 +11,13 @@ from torch import nn
 from torch.optim import Optimizer
 
 
+def set_optimizer_learning_rate(optimizer: Optimizer, learning_rate: float) -> None:
+    """Apply a scalar learning rate to every optimizer parameter group."""
+    lr_value = float(learning_rate)
+    for group in optimizer.param_groups:
+        group["lr"] = lr_value
+
+
 @dataclass(slots=True)
 class TrainState:
     """Minimal PyTorch training state with EMA tracking."""

@@ -10,7 +10,7 @@ from einops import rearrange, repeat
 from torch import Tensor
 
 from kdrifting.losses import drift_loss
-from kdrifting.training.state import TrainState
+from kdrifting.training.state import TrainState, set_optimizer_learning_rate
 
 FeatureApply = Callable[..., dict[str, Tensor]]
 
@@ -95,6 +95,8 @@ def train_step(
     activation_kwargs = dict(activation_kwargs or {})
     loss_kwargs = dict(loss_kwargs or {})
     generator = _step_generator(base_seed, state.step, labels.device)
+    current_lr = float(learning_rate_fn(state.step))
+    set_optimizer_learning_rate(state.optimizer, current_lr)
     state.model.train()
     state.optimizer.zero_grad(set_to_none=True)
 
@@ -168,7 +170,7 @@ def train_step(
     metrics = {
         "loss": float(total_loss.detach().item()),
         "g_norm": float(grad_norm.detach().item()),
-        "lr": float(learning_rate_fn(state.step - 1)),
+        "lr": current_lr,
     }
     metrics.update(total_info)
     return state, metrics
