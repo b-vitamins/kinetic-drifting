@@ -14,7 +14,7 @@ from kdrifting.checkpointing import (
     save_checkpoint,
     save_params_ema_artifact,
 )
-from kdrifting.config import load_yaml_config
+from kdrifting.config import export_model_config, load_yaml_config
 from kdrifting.data import get_postprocess_fn, infinite_sampler
 from kdrifting.eval.generation import evaluate_fid
 from kdrifting.features import build_feature_activation
@@ -388,7 +388,7 @@ def train_generator_from_config(
         preprocess_fn=cast(PreprocessFn, model_dict["preprocess_fn"]),
         postprocess_fn=model_dict["postprocess_fn"],
         feature_apply=activation_fn,
-        model_config=dict(config["model"]),
+        model_config=export_model_config(config),
         dataset_name=str(model_dict["dataset_name"]),
         workdir=workdir,
         device=runtime_device,

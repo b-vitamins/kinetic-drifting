@@ -10,7 +10,7 @@ import torch
 from tqdm.auto import tqdm
 
 from kdrifting.checkpointing import save_checkpoint, save_params_ema_artifact
-from kdrifting.config import load_yaml_config
+from kdrifting.config import export_model_config, load_yaml_config
 from kdrifting.data import epoch0_sampler, infinite_sampler
 from kdrifting.logging import log_for_0
 from kdrifting.model_builder import build_model_dict
@@ -233,7 +233,7 @@ def train_mae_from_config(
         train_loader=model_dict["train_loader"],
         learning_rate_fn=model_dict["learning_rate_fn"],
         preprocess_fn=cast(PreprocessFn, model_dict["preprocess_fn"]),
-        model_config=dict(config["model"]),
+        model_config=export_model_config(config),
         workdir=workdir,
         device=runtime_device,
         **train_kwargs,

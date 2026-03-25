@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import numpy as np
 import torch
@@ -23,6 +23,13 @@ from kdrifting.jax_artifacts import (
 from kdrifting.models.generator import DitGen
 from kdrifting.models.mae import MAEResNet
 from kdrifting.training.state import TrainState
+
+
+class ExternalCheckpointSource(NamedTuple):
+    """Resolved external training-checkpoint source."""
+
+    backend: str
+    path: Path
 
 
 def output_root(workdir: str | None = None) -> Path:
@@ -128,6 +135,20 @@ def _resolve_external_jax_checkpoint_dir(source: Path) -> Path | None:
     if _latest_checkpoint_path(checkpoint_dir) is not None:
         return None
     return checkpoint_dir
+
+
+def resolve_external_checkpoint_source(init_from: str | Path) -> ExternalCheckpointSource | None:
+    """Resolve a local external training-checkpoint source."""
+    source = Path(init_from).expanduser()
+    torch_checkpoint = _resolve_external_torch_checkpoint_path(source)
+    if torch_checkpoint is not None:
+        return ExternalCheckpointSource(backend="torch", path=torch_checkpoint)
+
+    jax_checkpoint_dir = _resolve_external_jax_checkpoint_dir(source)
+    if jax_checkpoint_dir is not None:
+        return ExternalCheckpointSource(backend="jax", path=jax_checkpoint_dir)
+
+    return None
 
 
 def _extract_optax_adam_state(opt_state: Any) -> tuple[int, Any, Any]:
@@ -268,16 +289,95 @@ def restore_external_checkpoint(
     kind: str,
 ) -> TrainState:
     """Restore an external torch or JAX training checkpoint into a state object."""
-    source = Path(init_from).expanduser()
-    torch_checkpoint = _resolve_external_torch_checkpoint_path(source)
-    if torch_checkpoint is not None:
-        return _restore_external_torch_checkpoint(state, checkpoint_path=torch_checkpoint)
-
-    jax_checkpoint_dir = _resolve_external_jax_checkpoint_dir(source)
-    if jax_checkpoint_dir is not None:
-        return _restore_external_jax_checkpoint(state, checkpoint_dir=jax_checkpoint_dir, kind=kind)
+    source = resolve_external_checkpoint_source(init_from)
+    if source is None:
+        return state
+    if source.backend == "torch":
+        return _restore_external_torch_checkpoint(state, checkpoint_path=source.path)
+    if source.backend == "jax":
+        return _restore_external_jax_checkpoint(state, checkpoint_dir=source.path, kind=kind)
 
     return state
+
+
+def write_run_metadata(
+    *,
+    workdir: str | None = None,
+    kind: str,
+    model_config: dict[str, Any] | None = None,
+    optimizer_config: dict[str, Any] | None = None,
+    train_config: dict[str, Any] | None = None,
+    step: int | None = None,
+    ema_decay: float | None = None,
+    source_init_from: str | None = None,
+) -> Path:
+    """Write self-describing metadata at the run root."""
+    root = output_root(workdir)
+    root.mkdir(parents=True, exist_ok=True)
+    metadata: dict[str, Any] = {
+        "format": "torch.run",
+        "kind": kind,
+        "backend": "torch",
+        "model_config": dict(model_config or {}),
+    }
+    if optimizer_config:
+        metadata["optimizer_config"] = dict(optimizer_config)
+    if train_config:
+        metadata["train_config"] = dict(train_config)
+    if step is not None:
+        metadata["step"] = int(step)
+    if ema_decay is not None:
+        metadata["ema_decay"] = float(ema_decay)
+    if source_init_from:
+        metadata["source_init_from"] = source_init_from
+    path = root / "metadata.json"
+    path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def write_state_dict_artifact(
+    state_dict: dict[str, Tensor],
+    *,
+    workdir: str | None = None,
+    kind: str,
+    model_config: dict[str, Any] | None = None,
+    step: int | None = None,
+    ema_decay: float | None = None,
+    source_init_from: str | None = None,
+    source_backend: str | None = None,
+    source_format: str | None = None,
+) -> Path:
+    """Write a canonical torch EMA artifact under ``params_ema/``."""
+    out_dir = output_root(workdir) / "params_ema"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    state_dict_path = out_dir / "ema_model.pt"
+    metadata: dict[str, Any] = {
+        "format": "torch.state_dict",
+        "kind": kind,
+        "backend": "torch",
+        "path": "params_ema/ema_model.pt",
+        "model_config": dict(model_config or {}),
+    }
+    if step is not None:
+        metadata["step"] = int(step)
+    if ema_decay is not None:
+        metadata["ema_decay"] = float(ema_decay)
+    if source_init_from:
+        metadata["source_init_from"] = source_init_from
+    if source_backend:
+        metadata["source_backend"] = source_backend
+    if source_format:
+        metadata["source_format"] = source_format
+
+    barrier()
+    if is_rank_zero():
+        torch.save(state_dict, state_dict_path)
+        (out_dir / "metadata.json").write_text(
+            json.dumps(metadata, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    barrier()
+    return out_dir
 
 
 def save_checkpoint(
@@ -323,25 +423,11 @@ def save_params_ema_artifact(
     model_config: dict[str, Any] | None = None,
 ) -> Path:
     """Save the EMA weights as a standalone artifact."""
-    out_dir = output_root(workdir) / "params_ema"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    state_dict_path = out_dir / "ema_model.pt"
-    barrier()
-    if is_rank_zero():
-        torch.save(state.ema_model.state_dict(), state_dict_path)
-
-        metadata = {
-            "format": "torch.state_dict",
-            "kind": kind,
-            "backend": "torch",
-            "ema_decay": state.ema_decay,
-            "step": state.step,
-            "path": "params_ema/ema_model.pt",
-            "model_config": dict(model_config or {}),
-        }
-        (out_dir / "metadata.json").write_text(
-            json.dumps(metadata, indent=2) + "\n",
-            encoding="utf-8",
-        )
-    barrier()
-    return out_dir
+    return write_state_dict_artifact(
+        state.ema_model.state_dict(),
+        workdir=workdir,
+        kind=kind,
+        model_config=model_config,
+        step=state.step,
+        ema_decay=state.ema_decay,
+    )
