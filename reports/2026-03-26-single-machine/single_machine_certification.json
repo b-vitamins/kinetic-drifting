@@ -1,0 +1,64 @@
+{
+  "system": {
+    "generated_at_utc": "2026-03-25T19:45:33+00:00",
+    "repo_root": "/home/b/projects/kdrifting",
+    "git_commit": "7fd085d878a85a1cabe635eb475a9b1ee441f7e4",
+    "git_branch": "master",
+    "python": "/home/b/projects/kdrifting/.venv/bin/python",
+    "python_version": "3.11.14",
+    "torch_version": "2.10.0",
+    "cuda_available": true,
+    "cuda_device_count": 1,
+    "cuda_devices": [
+      {
+        "index": 0,
+        "name": "NVIDIA GeForce RTX 3060",
+        "memory_gb": 11.62
+      }
+    ]
+  },
+  "overall_passed": true,
+  "cases": [
+    {
+      "name": "artifact-parity",
+      "description": "Model rebuild and checkpoint import parity against upstream JAX.",
+      "command": ".venv/bin/python -m pytest -q tests/unit/test_jax_artifacts.py tests/unit/test_checkpointing.py tests/unit/test_export.py -o cache_dir=/tmp/kdrifting-pytest-cache",
+      "duration_seconds": 46.11409553501289,
+      "returncode": 0,
+      "stdout": "............                                                             [100%]\n12 passed in 42.27s\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "math-parity",
+      "description": "Loss and metric math parity against upstream helpers.",
+      "command": ".venv/bin/python -m pytest -q tests/unit/test_losses.py tests/unit/test_eval.py -o cache_dir=/tmp/kdrifting-pytest-cache",
+      "duration_seconds": 7.750569391995668,
+      "returncode": 0,
+      "stdout": "............                                                             [100%]\n12 passed in 5.01s\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "training-parity",
+      "description": "Toy and real-model resumed training traces against upstream JAX.",
+      "command": ".venv/bin/python -m pytest -q tests/unit/test_training_steps.py -o cache_dir=/tmp/kdrifting-pytest-cache",
+      "duration_seconds": 131.24964565603295,
+      "returncode": 0,
+      "stdout": "......                                                                   [100%]\n6 passed in 125.11s (0:02:05)\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "runtime-parity",
+      "description": "Resume, runner, inference, and public evaluation-path parity.",
+      "command": ".venv/bin/python -m pytest -q tests/unit/test_runners.py tests/unit/test_inference.py -o cache_dir=/tmp/kdrifting-pytest-cache",
+      "duration_seconds": 15.413137445983011,
+      "returncode": 0,
+      "stdout": "........                                                                 [100%]\n8 passed in 12.85s\n",
+      "stderr": "",
+      "passed": true
+    }
+  ],
+  "total_duration_seconds": 200.52744802902453
+}
