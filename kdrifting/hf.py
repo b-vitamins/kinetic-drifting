@@ -27,12 +27,13 @@ class _HubModule(Protocol):
     snapshot_download: _SnapshotDownload
 
 
+def _load_json(path: Path) -> dict[str, Any]:
+    return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+
+
 def read_metadata(artifact_dir: Path) -> dict[str, Any]:
     """Read ``metadata.json`` from an artifact directory."""
-    return cast(
-        dict[str, Any],
-        json.loads((artifact_dir / "metadata.json").read_text(encoding="utf-8")),
-    )
+    return _load_json(artifact_dir / "metadata.json")
 
 
 def load_torch_ema_state_dict(artifact_dir: Path) -> dict[str, torch.Tensor]:
@@ -45,6 +46,10 @@ def load_torch_ema_state_dict(artifact_dir: Path) -> dict[str, torch.Tensor]:
 
 def _looks_like_torch_artifact(artifact_dir: Path) -> bool:
     return (artifact_dir / "ema_model.pt").is_file()
+
+
+def _looks_like_torch_checkpoint_file(path: Path) -> bool:
+    return path.is_file() and path.suffix == ".pt" and path.stem.startswith("step_")
 
 
 def _looks_like_direct_jax_artifact(artifact_dir: Path) -> bool:
@@ -64,6 +69,66 @@ def _looks_like_jax_artifact(artifact_dir: Path) -> bool:
             (artifact_dir / "checkpoints").is_dir(),
         ),
     )
+
+
+def _checkpoint_step_key(path: Path) -> int:
+    return int(path.stem.removeprefix("step_"))
+
+
+def _latest_torch_checkpoint_path(checkpoint_dir: Path) -> Path | None:
+    checkpoints = sorted(checkpoint_dir.glob("step_*.pt"), key=_checkpoint_step_key)
+    if not checkpoints:
+        return None
+    return checkpoints[-1]
+
+
+def _torch_checkpoint_path(source: Path) -> Path | None:
+    if _looks_like_torch_checkpoint_file(source):
+        return source
+    if source.name == "checkpoints" and source.is_dir():
+        return _latest_torch_checkpoint_path(source)
+    return None
+
+
+def _metadata_candidates(artifact_dir: Path) -> tuple[Path, ...]:
+    candidates = [artifact_dir / "metadata.json"]
+    if artifact_dir.name == "checkpoints":
+        candidates.extend(
+            [
+                artifact_dir.parent / "params_ema" / "metadata.json",
+                artifact_dir.parent / "metadata.json",
+            ],
+        )
+    return tuple(candidates)
+
+
+def read_metadata_if_present(artifact_dir: Path) -> dict[str, Any]:
+    """Read metadata from an artifact dir or its checkpoint siblings when available."""
+    for candidate in _metadata_candidates(artifact_dir):
+        if candidate.is_file():
+            return _load_json(candidate)
+    return {}
+
+
+def _load_torch_checkpoint_entry(
+    checkpoint_path: Path,
+) -> tuple[dict[str, torch.Tensor], dict[str, Any]]:
+    payload = cast(
+        dict[str, Any],
+        torch.load(checkpoint_path, map_location="cpu", weights_only=False),
+    )
+    state_dict = payload.get("ema_model", payload.get("model"))
+    if not isinstance(state_dict, dict):
+        raise ValueError(f"Torch checkpoint does not contain a model state dict: {checkpoint_path}")
+
+    metadata = read_metadata_if_present(checkpoint_path.parent)
+    if "step" not in metadata and "step" in payload:
+        metadata["step"] = int(payload["step"])
+    if "ema_decay" not in metadata and "ema_decay" in payload:
+        metadata["ema_decay"] = float(payload["ema_decay"])
+    metadata.setdefault("backend", "torch")
+    metadata.setdefault("format", "torch.checkpoint")
+    return cast(dict[str, torch.Tensor], state_dict), metadata
 
 
 def _download_artifact(
@@ -154,6 +219,20 @@ def load_mae_model(
     """Load a MAE model from a local or ``hf://`` artifact."""
     from kdrifting.models.mae import mae_from_metadata
 
+    local_path = Path(init_from).expanduser()
+    if not init_from.startswith(HF_PREFIX):
+        checkpoint_path = _torch_checkpoint_path(local_path.resolve())
+        if checkpoint_path is not None:
+            state_dict, metadata = _load_torch_checkpoint_entry(checkpoint_path)
+            if not metadata.get("model_config"):
+                raise ValueError(
+                    f"Torch checkpoint is missing metadata.model_config: {checkpoint_path}",
+                )
+            model = mae_from_metadata(metadata)
+            model.load_state_dict(state_dict)
+            model.eval()
+            return model, metadata
+
     artifact_dir = resolve_artifact_dir(
         init_from,
         kind="mae",
@@ -162,7 +241,7 @@ def load_mae_model(
         output_root=output_root,
     )
     backend = "torch"
-    metadata = read_metadata(artifact_dir) if (artifact_dir / "metadata.json").is_file() else {}
+    metadata = read_metadata_if_present(artifact_dir)
     if metadata.get("backend") == "jax" or (
         _looks_like_jax_artifact(artifact_dir) and not _looks_like_torch_artifact(artifact_dir)
     ):
@@ -177,9 +256,16 @@ def load_mae_model(
         model = mae_from_metadata(metadata)
         model.load_state_dict(convert_mae_jax_params(params, model))
     else:
-        metadata = read_metadata(artifact_dir)
+        if _looks_like_torch_artifact(artifact_dir):
+            metadata = read_metadata(artifact_dir)
+            state_dict = load_torch_ema_state_dict(artifact_dir)
+        else:
+            checkpoint_path = _latest_torch_checkpoint_path(artifact_dir)
+            if checkpoint_path is None:
+                raise FileNotFoundError(f"Could not find a torch checkpoint under {artifact_dir}")
+            state_dict, metadata = _load_torch_checkpoint_entry(checkpoint_path)
         model = mae_from_metadata(metadata)
-        model.load_state_dict(load_torch_ema_state_dict(artifact_dir))
+        model.load_state_dict(state_dict)
     model.eval()
     return model, metadata
 
@@ -194,6 +280,21 @@ def load_generator_model(
     """Load a generator model from a local or ``hf://`` artifact."""
     from kdrifting.models.generator import build_generator_from_config
 
+    local_path = Path(init_from).expanduser()
+    if not init_from.startswith(HF_PREFIX):
+        checkpoint_path = _torch_checkpoint_path(local_path.resolve())
+        if checkpoint_path is not None:
+            params, metadata = _load_torch_checkpoint_entry(checkpoint_path)
+            model_config = dict(metadata.get("model_config", {}) or {})
+            if not model_config:
+                raise ValueError(
+                    f"Torch checkpoint is missing metadata.model_config: {checkpoint_path}",
+                )
+            model = build_generator_from_config(model_config)
+            model.load_state_dict(params)
+            model.eval()
+            return model, metadata
+
     artifact_dir = resolve_artifact_dir(
         init_from,
         kind="gen",
@@ -201,7 +302,7 @@ def load_generator_model(
         prefix=prefix,
         output_root=output_root,
     )
-    metadata = read_metadata(artifact_dir) if (artifact_dir / "metadata.json").is_file() else {}
+    metadata = read_metadata_if_present(artifact_dir)
     backend = "torch"
     if metadata.get("backend") == "jax" or (
         _looks_like_jax_artifact(artifact_dir) and not _looks_like_torch_artifact(artifact_dir)
@@ -211,8 +312,14 @@ def load_generator_model(
     if backend == "jax":
         params, metadata = load_jax_init_entry(artifact_dir)
     else:
-        params = load_torch_ema_state_dict(artifact_dir)
-        metadata = read_metadata(artifact_dir)
+        if _looks_like_torch_artifact(artifact_dir):
+            params = load_torch_ema_state_dict(artifact_dir)
+            metadata = read_metadata(artifact_dir)
+        else:
+            checkpoint_path = _latest_torch_checkpoint_path(artifact_dir)
+            if checkpoint_path is None:
+                raise FileNotFoundError(f"Could not find a torch checkpoint under {artifact_dir}")
+            params, metadata = _load_torch_checkpoint_entry(checkpoint_path)
 
     model_config = dict(metadata.get("model_config", {}) or {})
     if not model_config:

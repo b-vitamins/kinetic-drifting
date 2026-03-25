@@ -30,3 +30,5 @@ Commits for commit subjects.
   restoring it on resume, and making checkpoint/artifact writes rank-safe.
 - Extended JAX import parity to resumable checkpoint directories, including
   numerical parity coverage for loading from run roots and `checkpoints/`.
+- Added torch checkpoint-directory and direct checkpoint-file restore support
+  for local MAE and generator loading, using EMA weights plus sibling metadata.
