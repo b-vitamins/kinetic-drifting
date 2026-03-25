@@ -553,6 +553,36 @@ class DitGen(nn.Module):
     def generate_image(self, x: Tensor, cond: Tensor, *, deterministic: bool = True) -> Tensor:
         return self.model(x, cond, deterministic=deterministic)
 
+    def sample_noise(
+        self,
+        *,
+        batch_size: int,
+        device: torch.device,
+        temp: float = 1.0,
+        generator: torch.Generator | None = None,
+    ) -> tuple[Tensor, Tensor]:
+        """Sample latent noise and auxiliary noise labels for generation."""
+        x = torch.randn(
+            batch_size,
+            self.input_size,
+            self.input_size,
+            self.in_channels,
+            device=device,
+            generator=generator,
+        )
+        x = x * temp
+        if self.use_bf16:
+            x = x.to(dtype=torch.bfloat16)
+
+        noise_labels = torch.randint(
+            0,
+            max(1, self.noise_classes),
+            (batch_size, max(1, self.noise_coords)),
+            device=device,
+            generator=generator,
+        )
+        return x, noise_labels
+
     def forward(
         self,
         c: Tensor,
@@ -561,36 +591,47 @@ class DitGen(nn.Module):
         deterministic: bool = True,
         train: bool = False,
         generator: torch.Generator | None = None,
+        noise_x: Tensor | None = None,
+        noise_labels: Tensor | None = None,
     ) -> dict[str, Tensor | dict[str, Tensor]]:
         del train
         batch = c.shape[0]
-        x = torch.randn(
-            batch,
-            self.input_size,
-            self.input_size,
-            self.in_channels,
-            device=c.device,
-            generator=generator,
-        )
-        x = x * temp
-        if self.use_bf16:
-            x = x.to(dtype=torch.bfloat16)
+        has_noise_x = noise_x is not None
+        has_noise_labels = noise_labels is not None
+        if has_noise_x != has_noise_labels:
+            raise ValueError("Expected both noise_x and noise_labels when overriding noise.")
 
-        max_noise_classes = max(1, self.noise_classes)
-        noise_labels = torch.randint(
-            0,
-            max_noise_classes,
-            (batch, max(1, self.noise_coords)),
-            device=c.device,
-            generator=generator,
-        )
-        cond = self.c_cfg_noise_to_cond(c, cfg_scale, noise_labels)
+        if noise_x is None:
+            x, sampled_noise_labels = self.sample_noise(
+                batch_size=batch,
+                device=c.device,
+                temp=temp,
+                generator=generator,
+            )
+        else:
+            x = noise_x.to(device=c.device)
+            sampled_noise_labels = cast(Tensor, noise_labels).to(device=c.device, dtype=torch.int64)
+            expected_x_shape = (batch, self.input_size, self.input_size, self.in_channels)
+            if tuple(x.shape) != expected_x_shape:
+                raise ValueError(
+                    f"noise_x shape mismatch: expected {expected_x_shape}, got {tuple(x.shape)}",
+                )
+            expected_noise_shape = (batch, max(1, self.noise_coords))
+            if tuple(sampled_noise_labels.shape) != expected_noise_shape:
+                raise ValueError(
+                    "noise_labels shape mismatch: "
+                    f"expected {expected_noise_shape}, got {tuple(sampled_noise_labels.shape)}",
+                )
+            if self.use_bf16:
+                x = x.to(dtype=torch.bfloat16)
+
+        cond = self.c_cfg_noise_to_cond(c, cfg_scale, sampled_noise_labels)
         samples = self.generate_image(x, cond, deterministic=deterministic)
         return {
             "samples": samples,
             "noise": {
                 "x": x,
-                "noise_labels": noise_labels,
+                "noise_labels": sampled_noise_labels,
             },
         }
 

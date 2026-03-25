@@ -40,6 +40,8 @@ def run_inference(
     device: str | torch.device | None = None,
     seed: int = 0,
     json_out: str = "",
+    noise_x: torch.Tensor | None = None,
+    noise_labels: torch.Tensor | None = None,
 ) -> dict[str, Any]:
     """Load a generator artifact, sample images, and save a preview grid."""
     if num_samples <= 0:
@@ -67,6 +69,8 @@ def run_inference(
         base_seed=seed,
         step=0,
         cfg_scale=cfg_scale,
+        noise_x=noise_x,
+        noise_labels=noise_labels,
     )
 
     output_dir = Path(workdir).expanduser().resolve()

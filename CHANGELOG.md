@@ -53,3 +53,6 @@ Commits for commit subjects.
 - Added round-trip parity coverage for exported JAX model artifacts and
   converted JAX training checkpoints, including full optimizer-state resume
   comparisons after conversion.
+- Added deterministic noise overrides to the generator sampling path and used
+  them to verify end-to-end public inference parity against upstream JAX for
+  both `run_inference` and the generator callback inside `run_fid_evaluation`.

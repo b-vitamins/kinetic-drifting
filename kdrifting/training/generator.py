@@ -57,6 +57,8 @@ def generate_step(
     base_seed: int,
     step: int,
     cfg_scale: float = 1.0,
+    noise_x: Tensor | None = None,
+    noise_labels: Tensor | None = None,
 ) -> Tensor:
     """Generate one postprocessed batch from class labels."""
     generator = _step_generator(base_seed, step, labels.device)
@@ -66,6 +68,8 @@ def generate_step(
         cfg_scale=cfg_scale,
         deterministic=True,
         generator=generator,
+        noise_x=noise_x,
+        noise_labels=noise_labels,
     )
     samples = outputs["samples"]
     if not isinstance(samples, Tensor):
